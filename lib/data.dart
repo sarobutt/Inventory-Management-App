@@ -255,4 +255,10 @@ class Db {
   }
 
   static Future<void> deleteProduct(String id) => _products.doc(id).delete();
+
+  /// Products (in any store) whose SKU/barcode exactly matches [sku].
+  static Future<List<Product>> findBySku(String sku) async {
+    final snap = await _products.where('sku', isEqualTo: sku).limit(20).get();
+    return snap.docs.map(Product.fromDoc).toList();
+  }
 }

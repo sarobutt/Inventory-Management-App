@@ -38,6 +38,13 @@ Columns (the first row must contain the headings, in any order):
 
 Only **Product** is required. Common alternative headings also work (Name, Item, Code, Barcode, Cost, Qty, Stock). Ready-made templates are in [`templates/`](templates/). Old `.xls` files must be re-saved as `.xlsx`.
 
+**Barcode scanning:** when adding or editing a product, tap **Scan barcode** (or the scan icon in the SKU field). The barcode number goes into **SKU**, and the product name is looked up automatically, in this order:
+1. **Your own products** in any store (also fills in price and description). This has no limit.
+2. [Open Beauty Facts](https://world.openbeautyfacts.org): a free database of cosmetics and personal-care products, with no limit.
+3. [UPCitemdb](https://www.upcitemdb.com): general retail. The free tier allows about 100 lookups a day, and it's only used if the first two don't know the barcode.
+
+If the barcode is already a product in the same store, the app offers to open that product instead of creating a duplicate. If nobody knows the barcode, type the name once, and every future scan of it fills in from your own products.
+
 **Refresh:** pull down on any list or table to reload the latest data from the server.
 
 ---
@@ -75,7 +82,7 @@ In VS Code: **Cmd + Shift + P → Git: Clone**, paste this repository's URL, and
 flutter create --org com.companyproducts --platforms=android,ios .
 
 # 2. Add Firebase packages
-flutter pub add firebase_core cloud_firestore pdf printing file_picker archive xml
+flutter pub add firebase_core cloud_firestore pdf printing file_picker archive xml mobile_scanner http
 
 # 3. Connect to YOUR Firebase project (opens a browser to sign in to Google)
 firebase login
@@ -158,6 +165,8 @@ lib/main.dart                              app start + Firebase init
 lib/data.dart                              models + all Firestore CRUD + stock counting
 lib/report.dart                            table building + PDF print/share
 lib/importer.dart                          Excel/CSV reading, matching, bulk writes
+lib/barcode.dart                           barcode lookup (own DB → Open Beauty Facts → UPCitemdb)
+lib/screens/scanner_screen.dart            camera barcode scanner
 lib/screens/import_screen.dart             import: pick file, preview, import
 lib/widgets.dart                           dialogs, stats, formatting
 lib/screens/companies_screen.dart          home: company list + search + totals
@@ -176,7 +185,7 @@ If you already cloned the earlier companies-and-products version:
 
 ```bash
 git pull
-flutter pub add pdf printing file_picker archive xml
+flutter pub add pdf printing file_picker archive xml mobile_scanner http
 flutter run
 ```
 

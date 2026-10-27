@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../barcode.dart';
 import '../data.dart';
 import '../widgets.dart';
+import 'scanner_screen.dart';
 
 /// Create a product in a store (product == null) or edit/delete an existing one.
 class ProductFormScreen extends StatefulWidget {
@@ -26,7 +28,77 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   late final _description = TextEditingController(text: widget.product?.description ?? '');
   bool _saving = false;
 
+  // Barcode lookup state
+  bool _lookingUp = false;
+  String? _lookupNote;
+  bool _lookupFound = false;
+  String? _suggestedName; // found name when the name field was already filled
+
   bool get _isEdit => widget.product != null;
+
+  /// Opens the camera, puts the barcode into SKU and fills in the product details.
+  Future<void> _scan() async {
+    final code = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (_) => const ScannerScreen()),
+    );
+    if (code == null || !mounted) return;
+
+    setState(() {
+      _sku.text = code;
+      _lookingUp = true;
+      _lookupNote = null;
+      _suggestedName = null;
+    });
+
+    final info = await lookupBarcode(code, preferStoreId: widget.storeId);
+    if (!mounted) return;
+    setState(() => _lookingUp = false);
+
+    // Already in this store? Offer to open it instead of creating a duplicate.
+    final existing = info.existing;
+    if (existing != null && existing.storeId == widget.storeId && existing.id != widget.product?.id) {
+      final open = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Already in this store'),
+          content: Text('“${existing.name}” (quantity ${existing.quantity}) already uses this barcode in this store. '
+              'Open it instead?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Stay here')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Open product')),
+          ],
+        ),
+      );
+      if (open == true && mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ProductFormScreen(companyId: widget.companyId, storeId: widget.storeId, product: existing),
+            fullscreenDialog: true,
+          ),
+        );
+        return;
+      }
+      if (!mounted) return;
+    }
+
+    setState(() {
+      _lookupFound = info.found;
+      if (!info.found) {
+        _lookupNote = 'Barcode $code not found in any database. Please type the product name.';
+        return;
+      }
+      if (_name.text.trim().isEmpty) {
+        _name.text = info.name!;
+      } else if (_name.text.trim() != info.name) {
+        _suggestedName = info.name;
+      }
+      if (_price.text.trim().isEmpty && info.price != null) _price.text = info.price!.toStringAsFixed(2);
+      if (_description.text.trim().isEmpty && info.description != null) _description.text = info.description!;
+      _lookupNote = 'Found in ${info.source}: ${info.name}';
+    });
+  }
 
   @override
   void dispose() {
@@ -124,6 +196,34 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            FilledButton.tonalIcon(
+              onPressed: _lookingUp || _saving ? null : _scan,
+              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+              icon: const Icon(Icons.qr_code_scanner),
+              label: const Text('Scan barcode'),
+            ),
+            if (_lookingUp)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Row(
+                  children: [
+                    SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+                    SizedBox(width: 10),
+                    Text('Looking up product…'),
+                  ],
+                ),
+              )
+            else if (_lookupNote != null)
+              _LookupNote(
+                text: _lookupNote!,
+                found: _lookupFound,
+                suggestedName: _suggestedName,
+                onUseName: () => setState(() {
+                  _name.text = _suggestedName!;
+                  _suggestedName = null;
+                }),
+              ),
+            const SizedBox(height: 16),
             TextFormField(
               controller: _name,
               autofocus: !_isEdit,
@@ -136,7 +236,15 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             TextFormField(
               controller: _sku,
               textCapitalization: TextCapitalization.characters,
-              decoration: const InputDecoration(labelText: 'SKU / code', hintText: 'Optional'),
+              decoration: InputDecoration(
+                labelText: 'SKU / barcode',
+                hintText: 'Optional',
+                suffixIcon: IconButton(
+                  tooltip: 'Scan barcode',
+                  icon: const Icon(Icons.qr_code_scanner),
+                  onPressed: _lookingUp || _saving ? null : _scan,
+                ),
+              ),
             ),
             const SizedBox(height: 16),
             Row(
@@ -203,6 +311,46 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _LookupNote extends StatelessWidget {
+  final String text;
+  final bool found;
+  final String? suggestedName;
+  final VoidCallback onUseName;
+
+  const _LookupNote({required this.text, required this.found, required this.suggestedName, required this.onUseName});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: found ? scheme.primaryContainer : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(found ? Icons.check_circle_outline : Icons.info_outline, size: 20),
+              const SizedBox(width: 8),
+              Expanded(child: Text(text)),
+            ],
+          ),
+          if (suggestedName != null)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(onPressed: onUseName, child: const Text('Use this name')),
+            ),
+        ],
       ),
     );
   }
