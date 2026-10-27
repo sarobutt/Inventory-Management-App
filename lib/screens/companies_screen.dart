@@ -4,6 +4,7 @@ import '../data.dart';
 import '../widgets.dart';
 import 'company_detail_screen.dart';
 import 'company_form_screen.dart';
+import 'import_screen.dart';
 import 'tables_screen.dart';
 
 /// Home screen: all companies.
@@ -26,6 +27,14 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
       appBar: AppBar(
         title: const Text('Inventory'),
         actions: [
+          IconButton(
+            tooltip: 'Import from Excel',
+            icon: const Icon(Icons.upload_file),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ImportScreen(), fullscreenDialog: true),
+            ),
+          ),
           IconButton(
             tooltip: 'View & print tables',
             icon: const Icon(Icons.table_chart_outlined),

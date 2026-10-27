@@ -10,7 +10,17 @@ App
 ```
 
 | | Companies | Stores | Products |
-|---|---|---|---|
+|**Import from Excel:** tap ⬆ (upload icon) on the home screen to import a whole spreadsheet, or on a store page to import straight into that store. Pick an `.xlsx` or `.csv` file and you get a preview showing which rows are new, which update existing products, and any rows that will be skipped. Choose **Replace stock** (after a stock take) or **Add to stock** (for a delivery), then tap **Import**. Missing companies and stores are created automatically. Existing products are matched by **SKU**, or by **name** if there's no SKU, within the same store.
+
+Columns (the first row must contain the headings, in any order):
+
+| Company | Store | Store Address | Product | SKU | Price | Quantity | Description |
+|---|---|---|---|---|---|---|---|
+| Acme Ltd | Hull City Centre | 12 Whitefriargate | Blue Widget | AC-001 | 4.99 | 120 | |
+
+Only **Product** is always required. Common alternative headings also work (Qty, Stock, Name, Item, Code, Barcode, Cost, Shop, Branch). Ready-made templates are in [`templates/`](templates/). Old `.xls` files must be re-saved as `.xlsx`.
+
+---|---|---|---|
 | **Create** | "+ Company" on home | "+ Store" on a company | "+ Product" on a store |
 | **Read** | Home list with search and totals | Company page | Store page, with search by name or SKU |
 | **Update** | ✏️ on a company page | ✏️ on a store page | Tap a product |
@@ -63,7 +73,7 @@ In VS Code: **Cmd + Shift + P → Git: Clone**, paste this repository's URL, and
 flutter create --org com.companyproducts --platforms=android,ios .
 
 # 2. Add Firebase packages
-flutter pub add firebase_core cloud_firestore pdf printing
+flutter pub add firebase_core cloud_firestore pdf printing file_picker archive xml
 
 # 3. Connect to YOUR Firebase project (opens a browser to sign in to Google)
 firebase login
@@ -129,6 +139,8 @@ Every record also has `createdAt` and `updatedAt`.
 lib/main.dart                              app start + Firebase init
 lib/data.dart                              models + all Firestore CRUD + stock counting
 lib/report.dart                            table building + PDF print/share
+lib/importer.dart                          Excel/CSV reading, matching, bulk writes
+lib/screens/import_screen.dart             import: pick file, preview, import
 lib/widgets.dart                           dialogs, stats, formatting
 lib/screens/companies_screen.dart          home: company list + search + totals
 lib/screens/company_detail_screen.dart     company + its stores
@@ -146,7 +158,7 @@ If you already cloned the earlier companies-and-products version:
 
 ```bash
 git pull
-flutter pub add pdf printing
+flutter pub add pdf printing file_picker archive xml
 flutter run
 ```
 

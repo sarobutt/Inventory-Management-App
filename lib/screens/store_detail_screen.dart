@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data.dart';
 import '../widgets.dart';
+import 'import_screen.dart';
 import 'product_form_screen.dart';
 import 'store_form_screen.dart';
 import 'tables_screen.dart';
@@ -100,6 +101,21 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
               appBar: AppBar(
                 title: Text(store.name),
                 actions: [
+                  IconButton(
+                    tooltip: 'Import products from Excel',
+                    icon: const Icon(Icons.upload_file),
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ImportScreen(
+                          companyId: store.companyId,
+                          storeId: store.id,
+                          storeName: store.name,
+                        ),
+                        fullscreenDialog: true,
+                      ),
+                    ),
+                  ),
                   IconButton(
                     tooltip: 'View & print table',
                     icon: const Icon(Icons.print_outlined),

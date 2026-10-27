@@ -1,0 +1,6 @@
+Company,Store,Store Address,Product,SKU,Price,Quantity,Description
+Acme Ltd,Hull City Centre,"12 Whitefriargate, Hull HU1 2HA",Blue Widget,AC-001,4.99,120,Standard size
+Acme Ltd,Hull City Centre,,Red Widget,AC-002,5.49,80,
+Acme Ltd,Leeds Trinity,"Trinity Leeds, LS1 5AT",Blue Widget,AC-001,4.99,45,
+Northern Foods,York Shambles,"5 The Shambles, York YO1 7LX",Oat Milk 1L,NF-OM1,1.85,200,Barista edition
+Northern Foods,York Shambles,,Granola 500g,NF-GR5,3.2,60,
