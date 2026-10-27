@@ -124,7 +124,7 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                     const SizedBox(height: 12),
                     if (companies.isEmpty)
                       q.isEmpty
-                          ? const EmptyState(
+                          ? EmptyState(
                               icon: Icons.business_outlined,
                               title: 'No companies yet',
                               hint: isAdmin ? 'Tap “+ Company” to add your first one.' : 'Nothing has been set up yet.',
