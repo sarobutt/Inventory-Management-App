@@ -30,7 +30,27 @@ class TableData {
 
 // ---------------- Building the three tables ----------------
 
-TableData companiesTable(List<Company> companies, List<Store> stores, List<Product> products) {
+/// Removes the given column indexes from headers, rows and totals (used to hide prices).
+TableData _withoutColumns(TableData t, Set<int> drop) {
+  if (drop.isEmpty) return t;
+  List<String> keep(List<String> r) => [for (var i = 0; i < r.length; i++) if (!drop.contains(i)) r[i]];
+  final numeric = <int>{};
+  var newIndex = 0;
+  for (var i = 0; i < t.headers.length; i++) {
+    if (drop.contains(i)) continue;
+    if (t.numericColumns.contains(i)) numeric.add(newIndex);
+    newIndex++;
+  }
+  return TableData(
+    title: t.title,
+    headers: keep(t.headers),
+    rows: [for (final r in t.rows) keep(r)],
+    numericColumns: numeric,
+    totals: t.totals == null ? null : keep(t.totals!),
+  );
+}
+
+TableData companiesTable(List<Company> companies, List<Store> stores, List<Product> products, {bool showPrices = true}) {
   final rows = <List<String>>[];
   var tStores = 0, tProducts = 0, tUnits = 0;
   var tValue = 0.0;
@@ -45,16 +65,17 @@ TableData companiesTable(List<Company> companies, List<Store> stores, List<Produ
     tValue += value;
     rows.add([c.name, c.description, count(s), count(ps.length), count(units), money(value)]);
   }
-  return TableData(
+  final t = TableData(
     title: 'Companies',
     headers: const ['Company', 'Description', 'Stores', 'Products', 'Units', 'Stock value'],
     rows: rows,
     numericColumns: const {2, 3, 4, 5},
     totals: ['TOTAL', '', count(tStores), count(tProducts), count(tUnits), money(tValue)],
   );
+  return showPrices ? t : _withoutColumns(t, {5});
 }
 
-TableData storesTable(List<Store> stores, List<Company> companies, List<Product> products) {
+TableData storesTable(List<Store> stores, List<Company> companies, List<Product> products, {bool showPrices = true}) {
   final companyName = {for (final c in companies) c.id: c.name};
   final rows = <List<String>>[];
   var tProducts = 0, tUnits = 0;
@@ -68,16 +89,17 @@ TableData storesTable(List<Store> stores, List<Company> companies, List<Product>
     tValue += value;
     rows.add([s.name, companyName[s.companyId] ?? '', s.address, count(ps.length), count(units), money(value)]);
   }
-  return TableData(
+  final t = TableData(
     title: 'Stores',
     headers: const ['Store', 'Company', 'Address', 'Products', 'Units', 'Stock value'],
     rows: rows,
     numericColumns: const {3, 4, 5},
     totals: ['TOTAL', '', '', count(tProducts), count(tUnits), money(tValue)],
   );
+  return showPrices ? t : _withoutColumns(t, {5});
 }
 
-TableData productsTable(List<Product> products, List<Company> companies, List<Store> stores) {
+TableData productsTable(List<Product> products, List<Company> companies, List<Store> stores, {bool showPrices = true}) {
   final companyName = {for (final c in companies) c.id: c.name};
   final storeName = {for (final s in stores) s.id: s.name};
   var tUnits = 0;
@@ -96,13 +118,14 @@ TableData productsTable(List<Product> products, List<Company> companies, List<St
       money(p.value),
     ]);
   }
-  return TableData(
+  final t = TableData(
     title: 'Products',
     headers: const ['Product', 'SKU', 'Company', 'Store', 'Price', 'Qty', 'Value'],
     rows: rows,
     numericColumns: const {4, 5, 6},
     totals: ['TOTAL', '', '', '', '', count(tUnits), money(tValue)],
   );
+  return showPrices ? t : _withoutColumns(t, {4, 6});
 }
 
 // ---------------- PDF / printing ----------------

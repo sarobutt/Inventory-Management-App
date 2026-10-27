@@ -82,7 +82,7 @@ In VS Code: **Cmd + Shift + P → Git: Clone**, paste this repository's URL, and
 flutter create --org com.companyproducts --platforms=android,ios .
 
 # 2. Add Firebase packages
-flutter pub add firebase_core cloud_firestore pdf printing file_picker archive xml mobile_scanner http
+flutter pub add firebase_core cloud_firestore pdf printing file_picker archive xml mobile_scanner http firebase_auth
 
 # 3. Connect to YOUR Firebase project (opens a browser to sign in to Google)
 firebase login
@@ -122,6 +122,39 @@ open ios/Runner.xcworkspace
 ```
 
 In Xcode, go to **Runner → Signing & Capabilities**, choose your Apple ID as the Team, plug in your iPhone and press ▶. A free Apple ID works for testing on your own phone (the app expires after 7 days). Publishing to the App Store or TestFlight requires the Apple Developer Program ($99/year): use **Product → Archive** in Xcode.
+
+## Accounts and roles
+
+The app now requires signing in with a **username and password**. Each account also has an email attached behind the scenes, which is used for "Forgot password".
+
+| | **Admin** | **Staff** |
+|---|---|---|
+| View companies, stores, products, stock | ✅ | ✅ |
+| See prices and stock value | ✅ | ❌ (hidden in the app, tables and PDFs) |
+| Add, edit or delete companies, stores and products | ✅ | ❌ |
+| Import from Excel | ✅ | ❌ |
+| Change stock | ✅ directly | 📝 **Request**, which an admin approves or rejects |
+| Print or share tables | ✅ | ✅ (without prices) |
+| Approve requests, manage users | ✅ | ❌ |
+| Own profile and change password | ✅ | ✅ |
+
+**Stock requests:** staff tap a product (or scan it) and choose **Add stock** or **Remove stock**, a quantity and an optional note. The admin sees a badge on the home screen, opens **Stock requests**, and taps **Approve** (stock updates) or **Reject**. The **History** tab is a full record of who asked, who approved, and the stock before and after. Staff see their own requests and can cancel pending ones.
+
+**Managing users (admin):** go to **Profile → Manage users → + User** and enter their name, username, email, starting password and role. From the same screen you can disable an account (it's blocked immediately), change a role, or send a password-reset email.
+
+### One-time setup for accounts (do these in order)
+1. **Turn on sign-in:** in Firebase Console, go to **Build → Authentication → Get started → Sign-in method → Email/Password → Enable → Save**.
+2. **Publish the new rules:** copy [`firestore.rules`](firestore.rules) into **Firestore Database → Rules** and click **Publish**. Older copies of the app (without sign-in) will stop working from this point, which is intended.
+3. **Update the app on the Mac:**
+   ```bash
+   git pull
+   flutter pub add firebase_auth
+   flutter run
+   ```
+4. On the sign-in screen, tap **Create admin account** (it only appears until the first admin exists). Your existing companies, stores and products are kept.
+5. Add your staff under **Profile → Manage users**.
+
+> Prices are hidden from staff everywhere in the app. Someone with technical skills could still read them from the database directly. If prices must be strictly secret, they can be moved to an admin-only collection later.
 
 ## Sending Android updates (no cable)
 
@@ -165,6 +198,8 @@ lib/main.dart                              app start + Firebase init
 lib/data.dart                              models + all Firestore CRUD + stock counting
 lib/report.dart                            table building + PDF print/share
 lib/importer.dart                          Excel/CSV reading, matching, bulk writes
+lib/auth.dart                              sign-in, profiles, roles, user management
+lib/requests.dart                          staff stock requests + admin approval
 lib/barcode.dart                           barcode lookup (own DB → Open Beauty Facts → UPCitemdb)
 lib/screens/scanner_screen.dart            camera barcode scanner
 lib/screens/import_screen.dart             import: pick file, preview, import
@@ -185,7 +220,7 @@ If you already cloned the earlier companies-and-products version:
 
 ```bash
 git pull
-flutter pub add pdf printing file_picker archive xml mobile_scanner http
+flutter pub add pdf printing file_picker archive xml mobile_scanner http firebase_auth
 flutter run
 ```
 

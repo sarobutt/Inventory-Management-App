@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../auth.dart';
 import '../data.dart';
 import '../report.dart';
 import '../widgets.dart';
@@ -95,13 +96,14 @@ class _TablesScreenState extends State<TablesScreen> with SingleTickerProviderSt
         .where((p) => (_companyId == null || p.companyId == _companyId) && (_storeId == null || p.storeId == _storeId))
         .toList();
 
+    final showPrices = Session.isAdmin(context);
     switch (kind) {
       case TableKind.companies:
-        return companiesTable(companies, stores, products);
+        return companiesTable(companies, stores, products, showPrices: showPrices);
       case TableKind.stores:
-        return storesTable(stores, _companies!, products);
+        return storesTable(stores, _companies!, products, showPrices: showPrices);
       case TableKind.products:
-        return productsTable(products, _companies!, _stores!);
+        return productsTable(products, _companies!, _stores!, showPrices: showPrices);
     }
   }
 

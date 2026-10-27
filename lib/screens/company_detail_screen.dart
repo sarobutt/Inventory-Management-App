@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../auth.dart';
 import '../data.dart';
 import '../widgets.dart';
 import 'company_form_screen.dart';
@@ -86,6 +87,7 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
               }
               final totalUnits = products.fold<int>(0, (sum, p) => sum + p.quantity);
               final totalValue = products.fold<double>(0, (sum, p) => sum + p.value);
+              final isAdmin = Session.isAdmin(context);
 
               return Scaffold(
                 appBar: AppBar(
@@ -101,6 +103,7 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
                         ),
                       ),
                     ),
+                    if (isAdmin)
                     IconButton(
                       tooltip: 'Edit company',
                       icon: const Icon(Icons.edit_outlined),
@@ -112,6 +115,7 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
                         ),
                       ),
                     ),
+                    if (isAdmin)
                     IconButton(
                       tooltip: 'Delete company',
                       icon: _deleting
@@ -123,7 +127,7 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
                     ),
                   ],
                 ),
-                floatingActionButton: FloatingActionButton.extended(
+                floatingActionButton: !isAdmin ? null : FloatingActionButton.extended(
                   onPressed: () => Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -148,7 +152,7 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
                     StatsRow([
                       ('Stores', count(stores?.length ?? 0)),
                       ('Units', count(totalUnits)),
-                      ('Stock value', money(totalValue)),
+                      if (isAdmin) ('Stock value', money(totalValue)),
                     ]),
                     SectionTitle('Stores (${stores?.length ?? 0})'),
                     if (storeSnap.hasError)
@@ -159,7 +163,7 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
                       const EmptyState(
                         icon: Icons.storefront_outlined,
                         title: 'No stores yet',
-                        hint: 'Tap “+ Store” to add a store to this company.',
+                        hint: 'An admin can add stores to this company.',
                       )
                     else
                       for (final s in stores)

@@ -11,7 +11,16 @@ class ProductFormScreen extends StatefulWidget {
   final String companyId;
   final String storeId;
   final Product? product;
-  const ProductFormScreen({super.key, required this.companyId, required this.storeId, this.product});
+
+  /// Pre-filled barcode (e.g. from scanning on the store page); its details are looked up automatically.
+  final String? initialSku;
+  const ProductFormScreen({
+    super.key,
+    required this.companyId,
+    required this.storeId,
+    this.product,
+    this.initialSku,
+  });
 
   @override
   State<ProductFormScreen> createState() => _ProductFormScreenState();
@@ -36,6 +45,17 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
   bool get _isEdit => widget.product != null;
 
+  @override
+  void initState() {
+    super.initState();
+    final sku = widget.initialSku;
+    if (sku != null && sku.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _applyCode(sku);
+      });
+    }
+  }
+
   /// Opens the camera, puts the barcode into SKU and fills in the product details.
   Future<void> _scan() async {
     final code = await Navigator.push<String>(
@@ -43,6 +63,10 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       MaterialPageRoute(builder: (_) => const ScannerScreen()),
     );
     if (code == null || !mounted) return;
+    await _applyCode(code);
+  }
+
+  Future<void> _applyCode(String code) async {
 
     setState(() {
       _sku.text = code;

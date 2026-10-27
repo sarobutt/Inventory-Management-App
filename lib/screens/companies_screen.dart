@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../auth.dart';
 import '../data.dart';
+import '../requests.dart';
 import '../widgets.dart';
 import 'company_detail_screen.dart';
 import 'company_form_screen.dart';
+import 'profile_screen.dart';
+import 'requests_screen.dart';
 import 'tables_screen.dart';
 
 /// Home screen: all companies.
@@ -31,25 +35,38 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final me = Session.of(context);
+    final isAdmin = me?.isAdmin ?? false;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Inventory'),
         actions: [
+          _RequestsButton(isAdmin: isAdmin),
           IconButton(
             tooltip: 'View & print tables',
             icon: const Icon(Icons.table_chart_outlined),
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TablesScreen())),
           ),
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: IconButton(
+              tooltip: 'My profile',
+              icon: CircleAvatar(radius: 15, child: Text(me?.initials ?? '?', style: const TextStyle(fontSize: 12))),
+              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileScreen())),
+            ),
+          ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const CompanyFormScreen(), fullscreenDialog: true),
-        ),
-        icon: const Icon(Icons.add),
-        label: const Text('Company'),
-      ),
+      floatingActionButton: !isAdmin
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const CompanyFormScreen(), fullscreenDialog: true),
+              ),
+              icon: const Icon(Icons.add),
+              label: const Text('Company'),
+            ),
       body: StreamBuilder<List<Company>>(
         stream: _companies,
         builder: (context, companySnap) {
@@ -83,6 +100,14 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
                   children: [
+                    if (me != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Text(
+                          'Hello, ${me.displayName.isEmpty ? me.username : me.displayName.split(' ').first} (${me.roleLabel})',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ),
                     StatsRow([
                       ('Companies', count(companySnap.data!.length)),
                       ('Stores', count(stores.length)),
@@ -102,7 +127,7 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                           ? const EmptyState(
                               icon: Icons.business_outlined,
                               title: 'No companies yet',
-                              hint: 'Tap “+ Company” to add your first one.',
+                              hint: isAdmin ? 'Tap “+ Company” to add your first one.' : 'Nothing has been set up yet.',
                             )
                           : const EmptyState(icon: Icons.search_off, title: 'No matches'),
                     for (final c in companies)
@@ -130,6 +155,49 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
           );
         },
       ),
+    );
+  }
+}
+
+/// App-bar button to the requests screen. For admins it shows how many are pending.
+class _RequestsButton extends StatefulWidget {
+  final bool isAdmin;
+  const _RequestsButton({required this.isAdmin});
+
+  @override
+  State<_RequestsButton> createState() => _RequestsButtonState();
+}
+
+class _RequestsButtonState extends State<_RequestsButton> {
+  // Created once, so rebuilding the home screen doesn't restart the listener.
+  final Stream<List<StockRequest>> _pending = StockRequests.watchPending();
+
+  void _open(BuildContext context) =>
+      Navigator.push(context, MaterialPageRoute(builder: (_) => const RequestsScreen()));
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.isAdmin) {
+      return IconButton(
+        tooltip: 'My stock requests',
+        icon: const Icon(Icons.pending_actions_outlined),
+        onPressed: () => _open(context),
+      );
+    }
+    return StreamBuilder<List<StockRequest>>(
+      stream: _pending,
+      builder: (context, snap) {
+        final n = snap.data?.length ?? 0;
+        return IconButton(
+          tooltip: 'Stock requests',
+          icon: Badge(
+            isLabelVisible: n > 0,
+            label: Text('$n'),
+            child: const Icon(Icons.pending_actions_outlined),
+          ),
+          onPressed: () => _open(context),
+        );
+      },
     );
   }
 }

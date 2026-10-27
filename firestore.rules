@@ -1,41 +1,132 @@
 rules_version = '2';
-// Open access (no sign-in). Anyone who has your app's Firebase config can read/write.
-// Writes are validated so only well-formed records that point at real parents are saved.
+
+// Inventory Management – security rules
+//
+//   Admin : full access (companies, stores, products, prices, approvals, users)
+//   Staff : read everything; create stock-change REQUESTS; cancel their own
+//           pending requests; edit their own name/phone. Nothing else.
+//   Not signed in : can only look up a username to sign in, and check
+//           whether the first admin has been set up.
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ---------- helpers ----------
+    function signedIn() {
+      return request.auth != null;
+    }
+    function userPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+    function hasProfile() {
+      return signedIn() && exists(userPath());
+    }
+    function me() {
+      return get(userPath()).data;
+    }
+    function isActive() {
+      return hasProfile() && me().active == true;
+    }
+    function isAdmin() {
+      return isActive() && me().role == 'admin';
+    }
+    function setupDone() {
+      return exists(/databases/$(database)/documents/meta/app);
+    }
     function validName() {
       return request.resource.data.name is string
           && request.resource.data.name.size() > 0
           && request.resource.data.name.size() <= 200;
     }
-    function companyExists(id) {
-      return exists(/databases/$(database)/documents/companies/$(id));
-    }
-    function storeExists(id) {
-      return exists(/databases/$(database)/documents/stores/$(id));
+    function changedOnly(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
     }
 
+    // ---------- setup marker ----------
+    match /meta/app {
+      allow get: if true;
+      // Created once, together with the first admin's profile.
+      allow create: if signedIn() && !setupDone()
+                    && getAfter(userPath()).data.role == 'admin'
+                    && request.resource.data.adminUid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // ---------- username → email lookup (for sign-in) ----------
+    match /usernames/{username} {
+      allow get: if true;          // single lookups only
+      allow list: if false;        // nobody can list all usernames
+      allow create: if (isAdmin() || (signedIn() && !setupDone()))
+                    && request.resource.data.uid is string
+                    && request.resource.data.email is string;
+      allow update, delete: if isAdmin();
+    }
+
+    // ---------- user profiles ----------
+    match /users/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow list: if isAdmin();
+
+      // Admin creates accounts; or the very first admin creates themselves during setup.
+      allow create: if isAdmin()
+                    || (signedIn() && request.auth.uid == uid && !setupDone()
+                        && request.resource.data.role == 'admin'
+                        && request.resource.data.active == true);
+
+      // Admin edits anyone; a user may only change their own name/phone.
+      allow update: if isAdmin()
+                    || (isActive() && request.auth.uid == uid
+                        && changedOnly(['displayName', 'phone', 'updatedAt']));
+      allow delete: if false;      // disable accounts instead
+    }
+
+    // ---------- inventory ----------
     match /companies/{id} {
-      allow read, delete: if true;
-      allow create, update: if validName();
+      allow read: if isActive();
+      allow delete: if isAdmin();
+      allow create, update: if isAdmin() && validName();
     }
 
     match /stores/{id} {
-      allow read, delete: if true;
-      allow create, update: if validName()
+      allow read: if isActive();
+      allow delete: if isAdmin();
+      allow create, update: if isAdmin() && validName()
                             && request.resource.data.companyId is string
-                            && companyExists(request.resource.data.companyId);
+                            && exists(/databases/$(database)/documents/companies/$(request.resource.data.companyId));
     }
 
     match /products/{id} {
-      allow read, delete: if true;
-      allow create, update: if validName()
+      allow read: if isActive();
+      allow delete: if isAdmin();
+      allow create, update: if isAdmin() && validName()
                             && request.resource.data.companyId is string
                             && request.resource.data.storeId is string
-                            && storeExists(request.resource.data.storeId)
+                            && exists(/databases/$(database)/documents/stores/$(request.resource.data.storeId))
                             && request.resource.data.quantity is int
                             && request.resource.data.quantity >= 0;
+    }
+
+    // ---------- stock change requests ----------
+    match /stockRequests/{id} {
+      allow read: if isActive();
+
+      // Any active user can ask; it must be pending, theirs, and a real change.
+      allow create: if isActive()
+                    && request.resource.data.requestedBy == request.auth.uid
+                    && request.resource.data.status == 'pending'
+                    && request.resource.data.delta is int
+                    && request.resource.data.delta != 0
+                    && request.resource.data.productId is string
+                    && exists(/databases/$(database)/documents/products/$(request.resource.data.productId));
+
+      // Admin approves/rejects. The requester can only cancel their own pending request.
+      allow update: if isAdmin()
+                    || (isActive()
+                        && resource.data.requestedBy == request.auth.uid
+                        && resource.data.status == 'pending'
+                        && request.resource.data.status == 'cancelled'
+                        && changedOnly(['status', 'decidedAt']));
+      allow delete: if isAdmin();
     }
   }
 }
