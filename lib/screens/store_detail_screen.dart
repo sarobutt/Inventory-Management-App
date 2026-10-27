@@ -17,8 +17,16 @@ class StoreDetailScreen extends StatefulWidget {
 }
 
 class _StoreDetailScreenState extends State<StoreDetailScreen> {
-  late final Stream<Store?> _store = Db.watchStore(widget.storeId);
-  late final Stream<List<Product>> _products = Db.watchProducts(storeId: widget.storeId);
+  late Stream<Store?> _store = Db.watchStore(widget.storeId);
+  late Stream<List<Product>> _products = Db.watchProducts(storeId: widget.storeId);
+
+  Future<void> _refresh() => pullRefresh(context, Db.refresh, () {
+        if (!mounted) return;
+        setState(() {
+          _store = Db.watchStore(widget.storeId);
+          _products = Db.watchProducts(storeId: widget.storeId);
+        });
+      });
   String _search = '';
   bool _deleting = false;
 
@@ -161,7 +169,10 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                 icon: const Icon(Icons.add),
                 label: const Text('Product'),
               ),
-              body: ListView(
+              body: RefreshIndicator(
+                onRefresh: _refresh,
+                child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
                 children: [
                   if (store.address.isNotEmpty)
@@ -214,6 +225,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                       onDelete: () => _removeProduct(p),
                     ),
                 ],
+              ),
               ),
             );
           },

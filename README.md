@@ -28,15 +28,17 @@ App
 | **Update** | ✏️ icon on a company page | Tap a product |
 | **Delete** | 🗑 icon on a company page (also deletes its products) | ⊖ on the product row, or "Delete product" in the form |
 
-**Import from Excel:** tap ⬆ (upload icon) on the home screen to import a whole spreadsheet, or on a store page to import straight into that store. Pick an `.xlsx` or `.csv` file and you get a preview showing which rows are new, which update existing products, and any rows that will be skipped. Choose **Replace stock** (after a stock take) or **Add to stock** (for a delivery), then tap **Import**. Missing companies and stores are created automatically. Existing products are matched by **SKU**, or by **name** if there's no SKU, within the same store.
+**Import products from Excel:** open a store and tap ⬆ (upload icon) to import products into **that store**. Pick an `.xlsx` or `.csv` file and you get a preview showing which rows are new, which update existing products, and any rows that will be skipped. Choose **Replace stock** (after a stock take) or **Add to stock** (for a delivery), then tap **Import**. Products already in the store are matched by **SKU**, or by **name** if there's no SKU, so they're updated rather than duplicated. Companies and stores are always created in the app, never by import.
 
 Columns (the first row must contain the headings, in any order):
 
-| Company | Store | Store Address | Product | SKU | Price | Quantity | Description |
-|---|---|---|---|---|---|---|---|
-| Acme Ltd | Hull City Centre | 12 Whitefriargate | Blue Widget | AC-001 | 4.99 | 120 | |
+| Product | SKU | Price | Quantity | Description |
+|---|---|---|---|---|
+| Blue Widget | AC-001 | 4.99 | 120 | Standard size |
 
-Only **Product** is always required. Common alternative headings also work (Qty, Stock, Name, Item, Code, Barcode, Cost, Shop, Branch). Ready-made templates are in [`templates/`](templates/). Old `.xls` files must be re-saved as `.xlsx`.
+Only **Product** is required. Common alternative headings also work (Name, Item, Code, Barcode, Cost, Qty, Stock). Ready-made templates are in [`templates/`](templates/). Old `.xls` files must be re-saved as `.xlsx`.
+
+**Refresh:** pull down on any list or table to reload the latest data from the server.
 
 ---
 

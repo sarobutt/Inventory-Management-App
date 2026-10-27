@@ -8,12 +8,11 @@ import 'package:xml/xml.dart';
 import 'data.dart';
 
 // =====================================================================
-//  Bulk import from Excel (.xlsx) or CSV.
+//  Import products into ONE store from Excel (.xlsx) or CSV.
 //
 //  Expected columns (header row, any order, case-insensitive):
-//    Company | Store | Store Address | Product | SKU | Price | Quantity | Description
-//  Only "Product" is always required. Company and Store are required
-//  unless you import from inside a store (then that store is used).
+//    Product | SKU | Price | Quantity | Description
+//  Only "Product" is required. Companies and stores are never created here.
 // =====================================================================
 
 class ImportException implements Exception {
@@ -26,9 +25,6 @@ class ImportException implements Exception {
 /// One data row from the file, after reading the columns.
 class ImportRow {
   final int line; // row number in the spreadsheet (1-based, incl. header)
-  final String company;
-  final String store;
-  final String address;
   final String product;
   final String sku;
   final double? price;
@@ -38,9 +34,6 @@ class ImportRow {
 
   const ImportRow({
     required this.line,
-    required this.company,
-    required this.store,
-    required this.address,
     required this.product,
     required this.sku,
     required this.price,
@@ -214,13 +207,10 @@ List<List<String>> _readXlsx(Uint8List bytes) {
 //  Turning the grid into rows
 // ---------------------------------------------------------------------
 
-enum _Col { company, store, address, product, sku, price, quantity, description }
+enum _Col { product, sku, price, quantity, description }
 
 const Map<_Col, List<String>> _aliases = {
-  _Col.company: ['company', 'companyname', 'business'],
-  _Col.store: ['store', 'storename', 'shop', 'branch', 'location'],
-  _Col.address: ['storeaddress', 'address', 'shopaddress', 'branchaddress'],
-  _Col.product: ['product', 'productname', 'name', 'item', 'itemname', 'productdescription'],
+  _Col.product: ['product', 'productname', 'name', 'item', 'itemname'],
   _Col.sku: ['sku', 'code', 'productcode', 'itemcode', 'barcode', 'ref', 'reference'],
   _Col.price: ['price', 'unitprice', 'cost', 'rrp', 'priceeach', 'sellingprice'],
   _Col.quantity: ['quantity', 'qty', 'stock', 'count', 'units', 'stockcount', 'onhand', 'qtyinstock'],
@@ -244,7 +234,6 @@ int? parseQuantity(String raw) {
 
 /// Finds the header row and converts the rest into [ImportRow]s.
 List<ImportRow> rowsFromGrid(List<List<String>> grid) {
-  // Header = first row that has at least one non-empty cell.
   final headerIndex = grid.indexWhere((r) => r.any((c) => c.trim().isNotEmpty));
   if (headerIndex < 0) throw ImportException('The file is empty.');
 
@@ -263,7 +252,7 @@ List<ImportRow> rowsFromGrid(List<List<String>> grid) {
   if (!colOf.containsKey(_Col.product)) {
     throw ImportException(
       'Could not find a "Product" column in the first row.\n'
-      'Expected headers: Company, Store, Store Address, Product, SKU, Price, Quantity, Description.',
+      'Expected headings: Product, SKU, Price, Quantity, Description.',
     );
   }
 
@@ -297,9 +286,6 @@ List<ImportRow> rowsFromGrid(List<List<String>> grid) {
 
     out.add(ImportRow(
       line: i + 1,
-      company: cell(r, _Col.company),
-      store: cell(r, _Col.store),
-      address: cell(r, _Col.address),
       product: product,
       sku: cell(r, _Col.sku),
       price: price,
@@ -313,7 +299,7 @@ List<ImportRow> rowsFromGrid(List<List<String>> grid) {
 }
 
 // ---------------------------------------------------------------------
-//  Planning: match rows to existing companies / stores / products
+//  Planning: match rows to the store's existing products
 // ---------------------------------------------------------------------
 
 enum QuantityMode {
@@ -333,22 +319,8 @@ class RowResult {
   const RowResult(this.row, this.status, this.note);
 }
 
-class _NewCompany {
-  final String name;
-  _NewCompany(this.name);
-}
-
-class _NewStore {
-  final String companyKey;
-  final String name;
-  String address;
-  _NewStore(this.companyKey, this.name, this.address);
-}
-
 class _ProductWrite {
   final String? existingId; // null = new product
-  final String companyKey;
-  final String storeKey;
   String name;
   String sku;
   double? price;
@@ -357,8 +329,6 @@ class _ProductWrite {
 
   _ProductWrite({
     required this.existingId,
-    required this.companyKey,
-    required this.storeKey,
     required this.name,
     required this.sku,
     required this.price,
@@ -368,70 +338,37 @@ class _ProductWrite {
 }
 
 class ImportPlan {
+  final String companyId;
+  final String storeId;
   final List<RowResult> results;
-  final Map<String, _NewCompany> _newCompanies;
-  final Map<String, _NewStore> _newStores;
-  final Map<String, _ProductWrite> _products;
+  final Map<String, _ProductWrite> _writes;
 
-  /// companyKey -> existing company id; storeKey -> existing store id.
-  final Map<String, String> _companyIds;
-  final Map<String, String> _storeIds;
+  ImportPlan._(this.companyId, this.storeId, this.results, this._writes);
 
-  ImportPlan._(this.results, this._newCompanies, this._newStores, this._products, this._companyIds, this._storeIds);
-
-  int get newCompanies => _newCompanies.length;
-  int get newStores => _newStores.length;
-  int get newProducts => _products.values.where((p) => p.existingId == null).length;
-  int get updatedProducts => _products.values.where((p) => p.existingId != null).length;
+  int get newProducts => _writes.values.where((p) => p.existingId == null).length;
+  int get updatedProducts => _writes.values.where((p) => p.existingId != null).length;
   int get errors => results.where((r) => r.status == RowStatus.error).length;
-  bool get hasWork => _products.isNotEmpty;
+  bool get hasWork => _writes.isNotEmpty;
 }
 
 String _key(String s) => s.trim().toLowerCase();
 
-/// Works out what the import will do without writing anything.
-/// [contextCompanyId]/[contextStoreId] are used for rows that leave Company/Store blank.
+/// Works out what the import will do in [storeId] without writing anything.
+/// [storeProducts] are the products currently in that store.
 ImportPlan buildPlan({
   required List<ImportRow> rows,
-  required List<Company> companies,
-  required List<Store> stores,
-  required List<Product> products,
+  required String companyId,
+  required String storeId,
+  required List<Product> storeProducts,
   required QuantityMode mode,
-  String? contextCompanyId,
-  String? contextStoreId,
 }) {
-  final companyIds = <String, String>{}; // companyKey -> id
-  final companyKeyById = <String, String>{};
-  for (final c in companies) {
-    final k = 'c:${_key(c.name)}';
-    companyIds.putIfAbsent(k, () => c.id);
-    companyKeyById[c.id] = k;
+  final bySku = <String, Product>{};
+  final byName = <String, Product>{};
+  for (final p in storeProducts) {
+    if (p.sku.isNotEmpty) bySku.putIfAbsent(_key(p.sku), () => p);
+    byName.putIfAbsent(_key(p.name), () => p);
   }
 
-  final storeIds = <String, String>{}; // storeKey -> id
-  final storeKeyById = <String, String>{};
-  for (final s in stores) {
-    final ck = companyKeyById[s.companyId];
-    if (ck == null) continue;
-    final k = '$ck|s:${_key(s.name)}';
-    storeIds.putIfAbsent(k, () => s.id);
-    storeKeyById[s.id] = k;
-  }
-
-  final existingBySku = <String, Product>{};
-  final existingByName = <String, Product>{};
-  for (final p in products) {
-    final sk = storeKeyById[p.storeId];
-    if (sk == null) continue;
-    if (p.sku.isNotEmpty) existingBySku.putIfAbsent('$sk|${_key(p.sku)}', () => p);
-    existingByName.putIfAbsent('$sk|${_key(p.name)}', () => p);
-  }
-
-  final contextCompanyKey = contextCompanyId == null ? null : companyKeyById[contextCompanyId];
-  final contextStoreKey = contextStoreId == null ? null : storeKeyById[contextStoreId];
-
-  final newCompanies = <String, _NewCompany>{};
-  final newStores = <String, _NewStore>{};
   final writes = <String, _ProductWrite>{};
   final results = <RowResult>[];
 
@@ -441,42 +378,11 @@ ImportPlan buildPlan({
       continue;
     }
 
-    // --- company ---
-    String companyKey;
-    if (row.company.isNotEmpty) {
-      companyKey = 'c:${_key(row.company)}';
-      if (!companyIds.containsKey(companyKey)) {
-        newCompanies.putIfAbsent(companyKey, () => _NewCompany(row.company));
-      }
-    } else if (contextCompanyKey != null) {
-      companyKey = contextCompanyKey;
-    } else {
-      results.add(RowResult(row, RowStatus.error, 'Company is empty'));
-      continue;
-    }
-
-    // --- store ---
-    String storeKey;
-    if (row.store.isNotEmpty) {
-      storeKey = '$companyKey|s:${_key(row.store)}';
-      if (!storeIds.containsKey(storeKey)) {
-        final ns = newStores.putIfAbsent(storeKey, () => _NewStore(companyKey, row.store, row.address));
-        if (ns.address.isEmpty && row.address.isNotEmpty) ns.address = row.address;
-      }
-    } else if (contextStoreKey != null && companyKey == contextCompanyKey) {
-      storeKey = contextStoreKey;
-    } else {
-      results.add(RowResult(row, RowStatus.error, 'Store is empty'));
-      continue;
-    }
-
-    // --- product: match by SKU first, then by name, within the store ---
-    final skuKey = row.sku.isEmpty ? null : '$storeKey|${_key(row.sku)}';
-    final nameKey = '$storeKey|${_key(row.product)}';
-    final writeKey = skuKey != null ? 'sku:$skuKey' : 'name:$nameKey';
-
+    // Match by SKU first, then by name.
+    final writeKey = row.sku.isNotEmpty ? 'sku:${_key(row.sku)}' : 'name:${_key(row.product)}';
     final pending = writes[writeKey];
-    final existing = pending == null ? (skuKey != null ? existingBySku[skuKey] : null) ?? existingByName[nameKey] : null;
+    final existing =
+        pending == null ? (row.sku.isNotEmpty ? bySku[_key(row.sku)] : null) ?? byName[_key(row.product)] : null;
 
     if (pending != null) {
       // Same product appears again in the file.
@@ -491,13 +397,10 @@ ImportPlan buildPlan({
         'Merged with an earlier row',
       ));
     } else if (existing != null) {
-      final qty = mode == QuantityMode.add
-          ? existing.quantity + (row.quantity ?? 0)
-          : (row.quantity ?? existing.quantity);
+      final qty =
+          mode == QuantityMode.add ? existing.quantity + (row.quantity ?? 0) : (row.quantity ?? existing.quantity);
       writes[writeKey] = _ProductWrite(
         existingId: existing.id,
-        companyKey: companyKey,
-        storeKey: storeKey,
         name: row.product,
         sku: row.sku.isNotEmpty ? row.sku : existing.sku,
         price: row.price ?? existing.price,
@@ -508,8 +411,6 @@ ImportPlan buildPlan({
     } else {
       writes[writeKey] = _ProductWrite(
         existingId: null,
-        companyKey: companyKey,
-        storeKey: storeKey,
         name: row.product,
         sku: row.sku,
         price: row.price,
@@ -520,90 +421,40 @@ ImportPlan buildPlan({
     }
   }
 
-  return ImportPlan._(results, newCompanies, newStores, writes, companyIds, storeIds);
+  return ImportPlan._(companyId, storeId, results, writes);
 }
 
 // ---------------------------------------------------------------------
 //  Writing to Firestore
 // ---------------------------------------------------------------------
 
-/// Applies the plan in three phases (companies, then stores, then products),
-/// so each record's parent already exists when it is saved.
+/// Saves the planned products (in batches of 400).
 Future<void> runImport(ImportPlan plan, {void Function(double progress)? onProgress}) async {
   final fs = FirebaseFirestore.instance;
-  final companyIds = Map<String, String>.from(plan._companyIds);
-  final storeIds = Map<String, String>.from(plan._storeIds);
+  final writes = plan._writes.values.toList();
 
-  final total = plan._newCompanies.length + plan._newStores.length + plan._products.length;
-  var done = 0;
-  void tick(int n) {
-    done += n;
-    if (onProgress != null && total > 0) onProgress(done / total);
-  }
-
-  Future<void> commitInChunks(List<void Function(WriteBatch b)> ops) async {
-    for (var i = 0; i < ops.length; i += 400) {
-      final batch = fs.batch();
-      final chunk = ops.skip(i).take(400).toList();
-      for (final op in chunk) {
-        op(batch);
+  for (var i = 0; i < writes.length; i += 400) {
+    final batch = fs.batch();
+    final chunk = writes.skip(i).take(400);
+    for (final p in chunk) {
+      final data = <String, dynamic>{
+        'companyId': plan.companyId,
+        'storeId': plan.storeId,
+        'name': p.name,
+        'sku': p.sku,
+        'price': p.price,
+        'quantity': p.quantity,
+        'description': p.description,
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+      if (p.existingId != null) {
+        batch.update(fs.collection('products').doc(p.existingId), data);
+      } else {
+        data['createdAt'] = FieldValue.serverTimestamp();
+        batch.set(fs.collection('products').doc(), data);
       }
-      await batch.commit();
-      tick(chunk.length);
     }
+    await batch.commit();
+    if (onProgress != null) onProgress((i + 400).clamp(0, writes.length) / writes.length);
   }
-
-  // 1. Companies
-  final companyOps = <void Function(WriteBatch b)>[];
-  plan._newCompanies.forEach((key, c) {
-    final ref = fs.collection('companies').doc();
-    companyIds[key] = ref.id;
-    companyOps.add((b) => b.set(ref, {
-          'name': c.name,
-          'description': '',
-          'createdAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        }));
-  });
-  await commitInChunks(companyOps);
-
-  // 2. Stores
-  final storeOps = <void Function(WriteBatch b)>[];
-  plan._newStores.forEach((key, s) {
-    final ref = fs.collection('stores').doc();
-    storeIds[key] = ref.id;
-    final companyId = companyIds[s.companyKey]!;
-    storeOps.add((b) => b.set(ref, {
-          'companyId': companyId,
-          'name': s.name,
-          'address': s.address,
-          'createdAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        }));
-  });
-  await commitInChunks(storeOps);
-
-  // 3. Products
-  final productOps = <void Function(WriteBatch b)>[];
-  for (final p in plan._products.values) {
-    final data = <String, dynamic>{
-      'companyId': companyIds[p.companyKey]!,
-      'storeId': storeIds[p.storeKey]!,
-      'name': p.name,
-      'sku': p.sku,
-      'price': p.price,
-      'quantity': p.quantity,
-      'description': p.description,
-      'updatedAt': FieldValue.serverTimestamp(),
-    };
-    if (p.existingId != null) {
-      final ref = fs.collection('products').doc(p.existingId);
-      productOps.add((b) => b.update(ref, data));
-    } else {
-      final ref = fs.collection('products').doc();
-      data['createdAt'] = FieldValue.serverTimestamp();
-      productOps.add((b) => b.set(ref, data));
-    }
-  }
-  await commitInChunks(productOps);
 }

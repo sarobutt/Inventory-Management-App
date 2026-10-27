@@ -17,10 +17,19 @@ class CompanyDetailScreen extends StatefulWidget {
 }
 
 class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
-  late final Stream<Company?> _company = Db.watchCompany(widget.companyId);
-  late final Stream<List<Store>> _stores = Db.watchStores(companyId: widget.companyId);
-  late final Stream<List<Product>> _products = Db.watchProducts(companyId: widget.companyId);
+  late Stream<Company?> _company = Db.watchCompany(widget.companyId);
+  late Stream<List<Store>> _stores = Db.watchStores(companyId: widget.companyId);
+  late Stream<List<Product>> _products = Db.watchProducts(companyId: widget.companyId);
   bool _deleting = false;
+
+  Future<void> _refresh() => pullRefresh(context, Db.refresh, () {
+        if (!mounted) return;
+        setState(() {
+          _company = Db.watchCompany(widget.companyId);
+          _stores = Db.watchStores(companyId: widget.companyId);
+          _products = Db.watchProducts(companyId: widget.companyId);
+        });
+      });
 
   Future<void> _deleteCompany(Company company, int stores, int products) async {
     final ok = await confirmDelete(
@@ -125,7 +134,10 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
                   icon: const Icon(Icons.add),
                   label: const Text('Store'),
                 ),
-                body: ListView(
+                body: RefreshIndicator(
+                  onRefresh: _refresh,
+                  child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
                   children: [
                     if (company.description.isNotEmpty)
@@ -171,6 +183,7 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
                           ),
                         ),
                   ],
+                ),
                 ),
               );
             },

@@ -94,6 +94,13 @@ class Db {
   static CollectionReference<Map<String, dynamic>> get _stores => _fs.collection('stores');
   static CollectionReference<Map<String, dynamic>> get _products => _fs.collection('products');
 
+  /// Pulls the latest data from the server (used by pull-to-refresh).
+  /// Throws if the device is offline.
+  static Future<void> refresh() async {
+    const server = GetOptions(source: Source.server);
+    await Future.wait([_companies.get(server), _stores.get(server), _products.get(server)]);
+  }
+
   /// Deletes many documents safely (Firestore batches are limited to 500 writes).
   static Future<void> _deleteAll(List<DocumentReference<Map<String, dynamic>>> refs) async {
     for (var i = 0; i < refs.length; i += 450) {

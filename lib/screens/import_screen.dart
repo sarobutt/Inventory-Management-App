@@ -5,14 +5,13 @@ import '../data.dart';
 import '../importer.dart';
 import '../widgets.dart';
 
-/// Import companies, stores and products from an Excel (.xlsx) or CSV file.
-/// When opened from a store page, rows without Company/Store go into that store.
+/// Import products into one store from an Excel (.xlsx) or CSV file.
 class ImportScreen extends StatefulWidget {
-  final String? companyId;
-  final String? storeId;
-  final String? storeName;
+  final String companyId;
+  final String storeId;
+  final String storeName;
 
-  const ImportScreen({super.key, this.companyId, this.storeId, this.storeName});
+  const ImportScreen({super.key, required this.companyId, required this.storeId, required this.storeName});
 
   @override
   State<ImportScreen> createState() => _ImportScreenState();
@@ -21,16 +20,12 @@ class ImportScreen extends StatefulWidget {
 class _ImportScreenState extends State<ImportScreen> {
   String? _fileName;
   List<ImportRow>? _rows;
-  List<Company> _companies = const [];
-  List<Store> _stores = const [];
   List<Product> _products = const [];
   ImportPlan? _plan;
   QuantityMode _mode = QuantityMode.replace;
   bool _loading = false;
   double? _progress; // non-null while importing
   String? _error;
-
-  bool get _inStore => widget.storeId != null;
 
   Future<void> _pickFile() async {
     setState(() {
@@ -49,19 +44,13 @@ class _ImportScreenState extends State<ImportScreen> {
 
       final rows = rowsFromGrid(readGrid(bytes, file.name));
 
-      // Load current data so we can match existing companies, stores and products.
-      final results = await Future.wait([
-        Db.watchCompanies().first,
-        Db.watchStores().first,
-        Db.watchProducts().first,
-      ]);
+      // Load the store's current products so existing ones are updated, not duplicated.
+      final products = await Db.watchProducts(storeId: widget.storeId).first;
 
       setState(() {
         _fileName = file.name;
         _rows = rows;
-        _companies = results[0] as List<Company>;
-        _stores = results[1] as List<Store>;
-        _products = results[2] as List<Product>;
+        _products = products;
         _loading = false;
         _replan();
       });
@@ -80,12 +69,10 @@ class _ImportScreenState extends State<ImportScreen> {
     if (rows == null) return;
     _plan = buildPlan(
       rows: rows,
-      companies: _companies,
-      stores: _stores,
-      products: _products,
+      companyId: widget.companyId,
+      storeId: widget.storeId,
+      storeProducts: _products,
       mode: _mode,
-      contextCompanyId: widget.companyId,
-      contextStoreId: widget.storeId,
     );
   }
 
@@ -120,7 +107,7 @@ class _ImportScreenState extends State<ImportScreen> {
     return PopScope(
       canPop: !importing,
       child: Scaffold(
-        appBar: AppBar(title: Text(_inStore ? 'Import into ${widget.storeName ?? 'store'}' : 'Import from Excel')),
+        appBar: AppBar(title: Text('Import into ${widget.storeName}')),
         bottomNavigationBar: plan == null
             ? null
             : SafeArea(
@@ -179,9 +166,6 @@ class _ImportScreenState extends State<ImportScreen> {
   Widget _instructions(BuildContext context) {
     final muted = Theme.of(context).colorScheme.onSurfaceVariant;
     const columns = [
-      ('Company', 'Created if it doesn’t exist'),
-      ('Store', 'Created if it doesn’t exist'),
-      ('Store Address', 'Optional'),
       ('Product', 'Required'),
       ('SKU', 'Optional, used to match existing products'),
       ('Price', 'Optional, e.g. 4.99'),
@@ -210,10 +194,8 @@ class _ImportScreenState extends State<ImportScreen> {
               ),
             const SizedBox(height: 10),
             Text(
-              _inStore
-                  ? 'Company and Store can be left out: rows without them go into this store.'
-                  : 'Existing products are matched by SKU (or by name) within the same store and updated; '
-                      'everything else is added. You’ll see a preview before anything is saved.',
+              'Products are added to ${widget.storeName}. Products already in this store are matched by SKU '
+              '(or by name) and updated instead of duplicated. You’ll see a preview before anything is saved.',
               style: TextStyle(color: muted),
             ),
           ],
@@ -234,8 +216,6 @@ class _ImportScreenState extends State<ImportScreen> {
         children: [
           _chip(context, '${plan.newProducts} new products', Icons.add_circle_outline),
           _chip(context, '${plan.updatedProducts} updates', Icons.sync),
-          if (plan.newStores > 0) _chip(context, '${plan.newStores} new stores', Icons.storefront_outlined),
-          if (plan.newCompanies > 0) _chip(context, '${plan.newCompanies} new companies', Icons.business_outlined),
           if (plan.errors > 0) _chip(context, '${plan.errors} rows skipped', Icons.error_outline, error: true),
         ],
       ),
@@ -271,8 +251,6 @@ class _ImportScreenState extends State<ImportScreen> {
           columns: const [
             DataColumn(label: Text('Row'), numeric: true),
             DataColumn(label: Text('Status')),
-            DataColumn(label: Text('Company')),
-            DataColumn(label: Text('Store')),
             DataColumn(label: Text('Product')),
             DataColumn(label: Text('SKU')),
             DataColumn(label: Text('Price'), numeric: true),
@@ -299,8 +277,6 @@ class _ImportScreenState extends State<ImportScreen> {
                               : scheme.primary,
                     ),
                   )),
-                  DataCell(Text(r.row.company.isEmpty && _inStore ? '(this)' : r.row.company)),
-                  DataCell(Text(r.row.store.isEmpty && _inStore ? '(this)' : r.row.store)),
                   DataCell(Text(r.row.product)),
                   DataCell(Text(r.row.sku)),
                   DataCell(Text(formatPrice(r.row.price))),

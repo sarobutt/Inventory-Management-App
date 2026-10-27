@@ -38,12 +38,29 @@ class _TablesScreenState extends State<TablesScreen> with SingleTickerProviderSt
   @override
   void initState() {
     super.initState();
-    void onError(Object e) => setState(() => _error = e);
+    _subscribe();
+    _tabs.addListener(() => setState(() {}));
+  }
+
+  void _subscribe() {
+    for (final s in _subs) {
+      s.cancel();
+    }
+    _subs.clear();
+    void onError(Object e) {
+      if (mounted) setState(() => _error = e);
+    }
+
     _subs.add(Db.watchCompanies().listen((v) => setState(() => _companies = v), onError: onError));
     _subs.add(Db.watchStores().listen((v) => setState(() => _stores = v), onError: onError));
     _subs.add(Db.watchProducts().listen((v) => setState(() => _products = v), onError: onError));
-    _tabs.addListener(() => setState(() {}));
   }
+
+  Future<void> _refresh() => pullRefresh(context, Db.refresh, () {
+        if (!mounted) return;
+        setState(() => _error = null);
+        _subscribe();
+      });
 
   @override
   void dispose() {
@@ -139,7 +156,7 @@ class _TablesScreenState extends State<TablesScreen> with SingleTickerProviderSt
                     Expanded(
                       child: TabBarView(
                         controller: _tabs,
-                        children: [for (final k in TableKind.values) _TableView(data: _table(k))],
+                        children: [for (final k in TableKind.values) _TableView(data: _table(k), onRefresh: _refresh)],
                       ),
                     ),
                   ],
@@ -227,12 +244,21 @@ class _Dropdown extends StatelessWidget {
 /// Scrollable (both directions) read-only table with a bold totals row.
 class _TableView extends StatelessWidget {
   final TableData data;
-  const _TableView({required this.data});
+  final Future<void> Function() onRefresh;
+  const _TableView({required this.data, required this.onRefresh});
 
   @override
   Widget build(BuildContext context) {
     if (data.rows.isEmpty) {
-      return const EmptyState(icon: Icons.table_rows_outlined, title: 'No records', hint: 'Try changing the filters.');
+      return RefreshIndicator(
+        onRefresh: onRefresh,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: const [
+            EmptyState(icon: Icons.table_rows_outlined, title: 'No records', hint: 'Try changing the filters.'),
+          ],
+        ),
+      );
     }
     final scheme = Theme.of(context).colorScheme;
     const bold = TextStyle(fontWeight: FontWeight.w700);
@@ -244,8 +270,11 @@ class _TableView extends StatelessWidget {
           ),
         );
 
-    return Scrollbar(
+    return RefreshIndicator(
+      onRefresh: onRefresh,
+      child: Scrollbar(
       child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -269,6 +298,7 @@ class _TableView extends StatelessWidget {
             ],
           ),
         ),
+      ),
       ),
     );
   }

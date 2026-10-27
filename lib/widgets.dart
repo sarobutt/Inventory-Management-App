@@ -51,6 +51,16 @@ Future<int?> askCount(BuildContext context, {required String title, required int
   );
 }
 
+/// Runs [Db.refresh]-style work for pull-to-refresh and reports problems.
+Future<void> pullRefresh(BuildContext context, Future<void> Function() fetch, VoidCallback resubscribe) async {
+  try {
+    await fetch();
+  } catch (_) {
+    if (context.mounted) showMessage(context, 'Could not refresh. Check your internet connection.');
+  }
+  resubscribe();
+}
+
 void showError(BuildContext context, Object error) {
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(

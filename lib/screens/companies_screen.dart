@@ -4,7 +4,6 @@ import '../data.dart';
 import '../widgets.dart';
 import 'company_detail_screen.dart';
 import 'company_form_screen.dart';
-import 'import_screen.dart';
 import 'tables_screen.dart';
 
 /// Home screen: all companies.
@@ -16,10 +15,19 @@ class CompaniesScreen extends StatefulWidget {
 }
 
 class _CompaniesScreenState extends State<CompaniesScreen> {
-  final _companies = Db.watchCompanies();
-  final _stores = Db.watchStores();
-  final _products = Db.watchProducts();
+  Stream<List<Company>> _companies = Db.watchCompanies();
+  Stream<List<Store>> _stores = Db.watchStores();
+  Stream<List<Product>> _products = Db.watchProducts();
   String _search = '';
+
+  Future<void> _refresh() => pullRefresh(context, Db.refresh, () {
+        if (!mounted) return;
+        setState(() {
+          _companies = Db.watchCompanies();
+          _stores = Db.watchStores();
+          _products = Db.watchProducts();
+        });
+      });
 
   @override
   Widget build(BuildContext context) {
@@ -27,14 +35,6 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
       appBar: AppBar(
         title: const Text('Inventory'),
         actions: [
-          IconButton(
-            tooltip: 'Import from Excel',
-            icon: const Icon(Icons.upload_file),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const ImportScreen(), fullscreenDialog: true),
-            ),
-          ),
           IconButton(
             tooltip: 'View & print tables',
             icon: const Icon(Icons.table_chart_outlined),
@@ -77,7 +77,10 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                 final companies =
                     companySnap.data!.where((c) => q.isEmpty || c.name.toLowerCase().contains(q)).toList();
 
-                return ListView(
+                return RefreshIndicator(
+                  onRefresh: _refresh,
+                  child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
                   children: [
                     StatsRow([
@@ -120,6 +123,7 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                         ),
                       ),
                   ],
+                ),
                 );
               },
             ),
