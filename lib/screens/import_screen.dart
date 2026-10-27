@@ -33,14 +33,14 @@ class _ImportScreenState extends State<ImportScreen> {
       _loading = true;
     });
     try {
-      final result = await FilePicker.platform.pickFiles(type: FileType.any, withData: true);
-      final file = result?.files.single;
+      // file_picker v13+: static pickFile(), bytes via readAsBytes().
+      final file = await FilePicker.pickFile();
       if (file == null) {
         setState(() => _loading = false);
         return;
       }
-      final bytes = file.bytes;
-      if (bytes == null) throw ImportException('Could not read the file. Please try again.');
+      final bytes = await file.readAsBytes();
+      if (bytes.isEmpty) throw ImportException('Could not read the file. Please try again.');
 
       final rows = rowsFromGrid(readGrid(bytes, file.name));
 
