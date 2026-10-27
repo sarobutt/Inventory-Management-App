@@ -3,8 +3,11 @@ import 'package:flutter/material.dart';
 import '../data.dart';
 import '../widgets.dart';
 import 'company_form_screen.dart';
-import 'product_form_screen.dart';
+import 'store_detail_screen.dart';
+import 'store_form_screen.dart';
+import 'tables_screen.dart';
 
+/// One company and its stores.
 class CompanyDetailScreen extends StatefulWidget {
   final String companyId;
   const CompanyDetailScreen({super.key, required this.companyId});
@@ -15,19 +18,15 @@ class CompanyDetailScreen extends StatefulWidget {
 
 class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
   late final Stream<Company?> _company = Db.watchCompany(widget.companyId);
+  late final Stream<List<Store>> _stores = Db.watchStores(companyId: widget.companyId);
   late final Stream<List<Product>> _products = Db.watchProducts(companyId: widget.companyId);
   bool _deleting = false;
 
-  String _details(Product p) {
-    final parts = [formatPrice(p.price), p.description].where((x) => x.isNotEmpty);
-    return parts.isEmpty ? 'No details' : parts.join(' · ');
-  }
-
-  Future<void> _deleteCompany(Company company, int productCount) async {
+  Future<void> _deleteCompany(Company company, int stores, int products) async {
     final ok = await confirmDelete(
       context,
       title: 'Delete company?',
-      message: '“${company.name}” and its $productCount product(s) will be permanently deleted.',
+      message: '“${company.name}”, its $stores store(s) and $products product(s) will be permanently deleted.',
     );
     if (!ok || !mounted) return;
     setState(() => _deleting = true);
@@ -45,29 +44,14 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
     }
   }
 
-  Future<void> _removeProduct(Company company, Product p) async {
-    final ok = await confirmDelete(
-      context,
-      title: 'Remove product?',
-      message: '“${p.name}” will be removed from ${company.name}.',
-    );
-    if (!ok) return;
-    try {
-      await Db.deleteProduct(p.id);
-      if (mounted) showMessage(context, 'Product removed');
-    } catch (e) {
-      if (mounted) showError(context, e);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<Company?>(
       stream: _company,
       builder: (context, companySnap) {
         if (companySnap.hasError) return Scaffold(appBar: AppBar(), body: ErrorState(companySnap.error!));
-        if (companySnap.connectionState == ConnectionState.waiting && !companySnap.hasData) {
-          return Scaffold(appBar: AppBar(), body: const Center(child: CircularProgressIndicator()));
+        if (!companySnap.hasData && companySnap.connectionState == ConnectionState.waiting) {
+          return Scaffold(appBar: AppBar(), body: const Loading());
         }
         final company = companySnap.data;
         if (company == null) {
@@ -77,117 +61,120 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
           );
         }
 
-        return StreamBuilder<List<Product>>(
-          stream: _products,
-          builder: (context, productSnap) {
-            final products = productSnap.data;
-            return Scaffold(
-              appBar: AppBar(
-                title: Text(company.name),
-                actions: [
-                  IconButton(
-                    tooltip: 'Edit company',
-                    icon: const Icon(Icons.edit_outlined),
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => CompanyFormScreen(company: company),
-                        fullscreenDialog: true,
+        return StreamBuilder<List<Store>>(
+          stream: _stores,
+          builder: (context, storeSnap) => StreamBuilder<List<Product>>(
+            stream: _products,
+            builder: (context, productSnap) {
+              final stores = storeSnap.data;
+              final products = productSnap.data ?? const <Product>[];
+
+              final productsPerStore = <String, int>{};
+              final unitsPerStore = <String, int>{};
+              for (final p in products) {
+                productsPerStore[p.storeId] = (productsPerStore[p.storeId] ?? 0) + 1;
+                unitsPerStore[p.storeId] = (unitsPerStore[p.storeId] ?? 0) + p.quantity;
+              }
+              final totalUnits = products.fold<int>(0, (sum, p) => sum + p.quantity);
+              final totalValue = products.fold<double>(0, (sum, p) => sum + p.value);
+
+              return Scaffold(
+                appBar: AppBar(
+                  title: Text(company.name),
+                  actions: [
+                    IconButton(
+                      tooltip: 'View & print tables',
+                      icon: const Icon(Icons.table_chart_outlined),
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => TablesScreen(companyId: company.id, initialTab: TableKind.stores),
+                        ),
                       ),
                     ),
-                  ),
-                  IconButton(
-                    tooltip: 'Delete company',
-                    icon: _deleting
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.delete_outline),
-                    onPressed: _deleting ? null : () => _deleteCompany(company, products?.length ?? 0),
-                  ),
-                ],
-              ),
-              floatingActionButton: FloatingActionButton.extended(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => ProductFormScreen(companyId: company.id),
-                    fullscreenDialog: true,
-                  ),
+                    IconButton(
+                      tooltip: 'Edit company',
+                      icon: const Icon(Icons.edit_outlined),
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => CompanyFormScreen(company: company),
+                          fullscreenDialog: true,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Delete company',
+                      icon: _deleting
+                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.delete_outline),
+                      onPressed: _deleting
+                          ? null
+                          : () => _deleteCompany(company, stores?.length ?? 0, products.length),
+                    ),
+                  ],
                 ),
-                icon: const Icon(Icons.add),
-                label: const Text('Product'),
-              ),
-              body: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-                children: [
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(company.name, style: Theme.of(context).textTheme.headlineSmall),
-                          const SizedBox(height: 6),
-                          Text(
-                            company.description.isEmpty ? 'No description' : company.description,
-                            style: TextStyle(
-                              color: company.description.isEmpty
-                                  ? Theme.of(context).colorScheme.onSurfaceVariant
-                                  : null,
-                            ),
-                          ),
-                        ],
+                floatingActionButton: FloatingActionButton.extended(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => StoreFormScreen(companyId: company.id),
+                      fullscreenDialog: true,
+                    ),
+                  ),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Store'),
+                ),
+                body: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+                  children: [
+                    if (company.description.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Text(company.description, style: Theme.of(context).textTheme.bodyLarge),
                       ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 24, 4, 8),
-                    child: Text(
-                      'PRODUCTS (${products?.length ?? 0})',
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(letterSpacing: 0.8),
-                    ),
-                  ),
-                  if (productSnap.hasError)
-                    ErrorState(productSnap.error!)
-                  else if (products == null)
-                    const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Center(child: CircularProgressIndicator()),
-                    )
-                  else if (products.isEmpty)
-                    const EmptyState(
-                      icon: Icons.inventory_2_outlined,
-                      title: 'No products yet',
-                      hint: 'Tap “+ Product” to add one to this company.',
-                    )
-                  else
-                    for (final p in products)
-                      Card(
-                        margin: const EdgeInsets.only(bottom: 10),
-                        child: ListTile(
-                          title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-                          subtitle: Text(
-                            _details(p),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          trailing: IconButton(
-                            tooltip: 'Remove ${p.name}',
-                            icon: Icon(Icons.remove_circle_outline, color: Theme.of(context).colorScheme.error),
-                            onPressed: () => _removeProduct(company, p),
-                          ),
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => ProductFormScreen(companyId: company.id, product: p),
-                              fullscreenDialog: true,
+                    StatsRow([
+                      ('Stores', count(stores?.length ?? 0)),
+                      ('Units', count(totalUnits)),
+                      ('Stock value', money(totalValue)),
+                    ]),
+                    SectionTitle('Stores (${stores?.length ?? 0})'),
+                    if (storeSnap.hasError)
+                      ErrorState(storeSnap.error!)
+                    else if (stores == null)
+                      const Loading()
+                    else if (stores.isEmpty)
+                      const EmptyState(
+                        icon: Icons.storefront_outlined,
+                        title: 'No stores yet',
+                        hint: 'Tap “+ Store” to add a store to this company.',
+                      )
+                    else
+                      for (final s in stores)
+                        Card(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          child: ListTile(
+                            leading: const CircleAvatar(child: Icon(Icons.storefront_outlined)),
+                            title: Text(s.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                            subtitle: Text(
+                              [
+                                if (s.address.isNotEmpty) s.address,
+                                '${productsPerStore[s.id] ?? 0} products · ${count(unitsPerStore[s.id] ?? 0)} units',
+                              ].join('\n'),
+                            ),
+                            isThreeLine: s.address.isNotEmpty,
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => StoreDetailScreen(storeId: s.id)),
                             ),
                           ),
                         ),
-                      ),
-                ],
-              ),
-            );
-          },
+                  ],
+                ),
+              );
+            },
+          ),
         );
       },
     );

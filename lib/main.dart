@@ -16,7 +16,7 @@ class CompanyProductsApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Company Products',
+      title: 'Inventory Management',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,

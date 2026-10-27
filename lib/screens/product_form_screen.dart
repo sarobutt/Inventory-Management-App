@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../data.dart';
 import '../widgets.dart';
 
-/// Create a product for [companyId] (product == null) or edit/delete an existing one.
+/// Create a product in a store (product == null) or edit/delete an existing one.
 class ProductFormScreen extends StatefulWidget {
   final String companyId;
+  final String storeId;
   final Product? product;
-  const ProductFormScreen({super.key, required this.companyId, this.product});
+  const ProductFormScreen({super.key, required this.companyId, required this.storeId, this.product});
 
   @override
   State<ProductFormScreen> createState() => _ProductFormScreenState();
@@ -16,9 +18,11 @@ class ProductFormScreen extends StatefulWidget {
 class _ProductFormScreenState extends State<ProductFormScreen> {
   final _formKey = GlobalKey<FormState>();
   late final _name = TextEditingController(text: widget.product?.name ?? '');
+  late final _sku = TextEditingController(text: widget.product?.sku ?? '');
   late final _price = TextEditingController(
     text: widget.product?.price == null ? '' : widget.product!.price!.toStringAsFixed(2),
   );
+  late final _quantity = TextEditingController(text: '${widget.product?.quantity ?? 0}');
   late final _description = TextEditingController(text: widget.product?.description ?? '');
   bool _saving = false;
 
@@ -27,7 +31,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   @override
   void dispose() {
     _name.dispose();
+    _sku.dispose();
     _price.dispose();
+    _quantity.dispose();
     _description.dispose();
     super.dispose();
   }
@@ -38,17 +44,40 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     return double.tryParse(t);
   }
 
+  void _step(int delta) {
+    final current = int.tryParse(_quantity.text.trim()) ?? 0;
+    final next = current + delta < 0 ? 0 : current + delta;
+    setState(() => _quantity.text = '$next');
+  }
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
     try {
       final name = _name.text.trim();
+      final sku = _sku.text.trim();
       final price = _parsePrice(_price.text);
+      final quantity = int.tryParse(_quantity.text.trim()) ?? 0;
       final description = _description.text.trim();
       if (_isEdit) {
-        await Db.updateProduct(widget.product!.id, name: name, price: price, description: description);
+        await Db.updateProduct(
+          widget.product!.id,
+          name: name,
+          sku: sku,
+          price: price,
+          quantity: quantity,
+          description: description,
+        );
       } else {
-        await Db.createProduct(widget.companyId, name: name, price: price, description: description);
+        await Db.createProduct(
+          companyId: widget.companyId,
+          storeId: widget.storeId,
+          name: name,
+          sku: sku,
+          price: price,
+          quantity: quantity,
+          description: description,
+        );
       }
       if (mounted) {
         Navigator.pop(context);
@@ -105,15 +134,43 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             ),
             const SizedBox(height: 8),
             TextFormField(
-              controller: _price,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'Price (£)', hintText: 'Optional', prefixText: '£ '),
-              validator: (v) {
-                if (v == null || v.trim().isEmpty) return null;
-                final p = _parsePrice(v);
-                if (p == null || p < 0) return 'Enter a valid price, e.g. 9.99';
-                return null;
-              },
+              controller: _sku,
+              textCapitalization: TextCapitalization.characters,
+              decoration: const InputDecoration(labelText: 'SKU / code', hintText: 'Optional'),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _price,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(labelText: 'Price', hintText: 'Optional', prefixText: '£ '),
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty) return null;
+                      final p = _parsePrice(v);
+                      if (p == null || p < 0) return 'Invalid price';
+                      return null;
+                    },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextFormField(
+                    controller: _quantity,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    textAlign: TextAlign.center,
+                    decoration: InputDecoration(
+                      labelText: 'Quantity',
+                      prefixIcon: IconButton(icon: const Icon(Icons.remove), onPressed: () => _step(-1)),
+                      suffixIcon: IconButton(icon: const Icon(Icons.add), onPressed: () => _step(1)),
+                    ),
+                    validator: (v) => int.tryParse((v ?? '').trim()) == null ? 'Enter a number' : null,
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 16),
             TextFormField(
@@ -121,7 +178,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
               minLines: 3,
               maxLines: 6,
               textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(labelText: 'Description', hintText: 'Optional', alignLabelWithHint: true),
+              decoration:
+                  const InputDecoration(labelText: 'Description', hintText: 'Optional', alignLabelWithHint: true),
             ),
             const SizedBox(height: 24),
             FilledButton(

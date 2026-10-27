@@ -1,20 +1,41 @@
 rules_version = '2';
 // Open access (no sign-in). Anyone who has your app's Firebase config can read/write.
-// Fields are validated so only well-formed companies/products can be saved.
+// Writes are validated so only well-formed records that point at real parents are saved.
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function validName() {
+      return request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 200;
+    }
+    function companyExists(id) {
+      return exists(/databases/$(database)/documents/companies/$(id));
+    }
+    function storeExists(id) {
+      return exists(/databases/$(database)/documents/stores/$(id));
+    }
+
     match /companies/{id} {
       allow read, delete: if true;
-      allow create, update: if request.resource.data.name is string
-                            && request.resource.data.name.size() > 0
-                            && request.resource.data.name.size() <= 200;
+      allow create, update: if validName();
     }
+
+    match /stores/{id} {
+      allow read, delete: if true;
+      allow create, update: if validName()
+                            && request.resource.data.companyId is string
+                            && companyExists(request.resource.data.companyId);
+    }
+
     match /products/{id} {
       allow read, delete: if true;
-      allow create, update: if request.resource.data.name is string
-                            && request.resource.data.name.size() > 0
+      allow create, update: if validName()
                             && request.resource.data.companyId is string
-                            && exists(/databases/$(database)/documents/companies/$(request.resource.data.companyId));
+                            && request.resource.data.storeId is string
+                            && storeExists(request.resource.data.storeId)
+                            && request.resource.data.quantity is int
+                            && request.resource.data.quantity >= 0;
     }
   }
 }
