@@ -116,6 +116,22 @@ open ios/Runner.xcworkspace
 
 In Xcode, go to **Runner → Signing & Capabilities**, choose your Apple ID as the Team, plug in your iPhone and press ▶. A free Apple ID works for testing on your own phone (the app expires after 7 days). Publishing to the App Store or TestFlight requires the Apple Developer Program ($99/year): use **Product → Archive** in Xcode.
 
+## Sending Android updates (no cable)
+
+Use **Firebase App Distribution**. It's free and already part of your Firebase project.
+
+**One-time setup**
+1. In Firebase Console, go to **Release & Monitor → App Distribution** and click **Get started**. Choose the Android app.
+2. Open the **Testers & Groups** tab, click **Add group**, and name it exactly `testers`. Add your email (and anyone else's).
+3. On each phone, open the invite email, tap **Get started**, sign in with the same Google account, and follow the prompts. This installs the App Tester app, which notifies you of updates.
+4. On the Mac, sign in once with `firebase login`.
+
+**Every update**
+```bash
+./scripts/release_android.sh "Added Excel import"
+```
+This builds the APK, uploads it, and notifies everyone in the `testers` group. They tap **Update** on their phone, and their data stays as it is.
+
 ## Troubleshooting
 
 | Problem | Fix |
