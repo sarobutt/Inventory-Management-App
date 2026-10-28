@@ -80,9 +80,11 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
               final products = productSnap.data ?? const <Product>[];
 
               final productsPerStore = <String, int>{};
+              final lowPerStore = <String, int>{};
               final unitsPerStore = <String, int>{};
               for (final p in products) {
                 productsPerStore[p.storeId] = (productsPerStore[p.storeId] ?? 0) + 1;
+                if (p.needsOrdering) lowPerStore[p.storeId] = (lowPerStore[p.storeId] ?? 0) + 1;
                 unitsPerStore[p.storeId] = (unitsPerStore[p.storeId] ?? 0) + p.quantity;
               }
               final totalUnits = products.fold<int>(0, (sum, p) => sum + p.quantity);
@@ -154,6 +156,24 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
                       ('Units', count(totalUnits)),
                       if (isAdmin) ('Stock value', money(totalValue)),
                     ]),
+                    if (lowPerStore.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      NeedsOrderingBanner(
+                        count: lowPerStore.values.fold<int>(0, (a, b) => a + b),
+                        active: false,
+                        actionLabel: 'View list',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => TablesScreen(
+                              companyId: company.id,
+                              initialTab: TableKind.products,
+                              needsOrderingOnly: true,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                     SectionTitle('Stores (${stores?.length ?? 0})'),
                     if (storeSnap.hasError)
                       ErrorState(storeSnap.error!)
@@ -175,7 +195,8 @@ class _CompanyDetailScreenState extends State<CompanyDetailScreen> {
                             subtitle: Text(
                               [
                                 if (s.address.isNotEmpty) s.address,
-                                '${productsPerStore[s.id] ?? 0} products · ${count(unitsPerStore[s.id] ?? 0)} units',
+                                '${productsPerStore[s.id] ?? 0} products · ${count(unitsPerStore[s.id] ?? 0)} units'
+                                    '${(lowPerStore[s.id] ?? 0) > 0 ? ' · ⚠ ${lowPerStore[s.id]} need ordering' : ''}',
                               ].join('\n'),
                             ),
                             isThreeLine: s.address.isNotEmpty,

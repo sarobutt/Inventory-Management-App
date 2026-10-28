@@ -108,7 +108,11 @@ service cloud.firestore {
                             && (!('retailPrice' in request.resource.data)
                                 || request.resource.data.retailPrice == null
                                 || (request.resource.data.retailPrice is number
-                                    && request.resource.data.retailPrice >= 0));
+                                    && request.resource.data.retailPrice >= 0))
+                            && (!('reorderLevel' in request.resource.data)
+                                || request.resource.data.reorderLevel == null
+                                || (request.resource.data.reorderLevel is int
+                                    && request.resource.data.reorderLevel >= 0));
     }
 
     // Wholesale and per-item prices: admins only, for reading AND writing.

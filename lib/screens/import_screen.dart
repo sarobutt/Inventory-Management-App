@@ -172,6 +172,7 @@ class _ImportScreenState extends State<ImportScreen> {
       ('Wholesale Price', 'Optional (admins only)'),
       ('Per Item Price', 'Optional (admins only)'),
       ('Quantity', 'Optional, stock count'),
+      ('Reorder Level', 'Optional, “needs ordering” alert level'),
       ('Description', 'Optional'),
     ];
     return Card(

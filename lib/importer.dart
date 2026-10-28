@@ -11,7 +11,7 @@ import 'data.dart';
 //  Import products into ONE store from Excel (.xlsx) or CSV.
 //
 //  Expected columns (header row, any order, case-insensitive):
-//    Product | SKU | Retail Price | Wholesale Price | Per Item Price | Quantity | Description
+//    Product | SKU | Retail Price | Wholesale Price | Per Item Price | Quantity | Reorder Level | Description
 //  Only "Product" is required. Companies and stores are never created here.
 // =====================================================================
 
@@ -29,6 +29,7 @@ class ImportRow {
   final String sku;
   final Prices prices;
   final int? quantity;
+  final int? reorderLevel;
   final String description;
   final String? error;
 
@@ -38,6 +39,7 @@ class ImportRow {
     required this.sku,
     required this.prices,
     required this.quantity,
+    this.reorderLevel,
     required this.description,
     this.error,
   });
@@ -207,7 +209,7 @@ List<List<String>> _readXlsx(Uint8List bytes) {
 //  Turning the grid into rows
 // ---------------------------------------------------------------------
 
-enum _Col { product, sku, retail, wholesale, perItem, quantity, description }
+enum _Col { product, sku, retail, wholesale, perItem, quantity, reorder, description }
 
 const Map<_Col, List<String>> _aliases = {
   _Col.product: ['product', 'productname', 'name', 'item', 'itemname'],
@@ -219,6 +221,10 @@ const Map<_Col, List<String>> _aliases = {
     'unitprice', 'priceeach', 'each', 'singleprice', 'singleitemprice',
   ],
   _Col.quantity: ['quantity', 'qty', 'stock', 'count', 'units', 'stockcount', 'onhand', 'qtyinstock'],
+  _Col.reorder: [
+    'reorderlevel', 'reorder', 'reorderat', 'reorderpoint', 'minstock', 'minimumstock', 'minimum', 'min',
+    'lowstock', 'lowstocklevel', 'alertat',
+  ],
   _Col.description: ['description', 'notes', 'details', 'comment', 'comments'],
 };
 
@@ -257,7 +263,7 @@ List<ImportRow> rowsFromGrid(List<List<String>> grid) {
   if (!colOf.containsKey(_Col.product)) {
     throw ImportException(
       'Could not find a "Product" column in the first row.\n'
-      'Expected headings: Product, SKU, Retail Price, Wholesale Price, Per Item Price, Quantity, Description.',
+      'Expected headings: Product, SKU, Retail Price, Wholesale Price, Per Item Price, Quantity, Reorder Level, Description.',
     );
   }
 
@@ -274,6 +280,8 @@ List<ImportRow> rowsFromGrid(List<List<String>> grid) {
 
     final qtyText = cell(r, _Col.quantity);
     final qty = parseQuantity(qtyText);
+    final reorderText = cell(r, _Col.reorder);
+    final reorder = parseQuantity(reorderText);
     final product = cell(r, _Col.product);
 
     // Three prices; remember the first one that can't be read.
@@ -299,6 +307,8 @@ List<ImportRow> rowsFromGrid(List<List<String>> grid) {
       error = 'Product name is too long';
     } else if (priceError != null) {
       error = priceError;
+    } else if (reorderText.isNotEmpty && (reorder == null || reorder < 0)) {
+      error = 'Invalid reorder level "$reorderText"';
     } else if (qtyText.isNotEmpty && (qty == null || qty < 0)) {
       error = 'Invalid quantity "$qtyText"';
     }
@@ -309,6 +319,7 @@ List<ImportRow> rowsFromGrid(List<List<String>> grid) {
       sku: cell(r, _Col.sku),
       prices: prices,
       quantity: qty,
+      reorderLevel: reorder,
       description: cell(r, _Col.description),
       error: error,
     ));
@@ -344,6 +355,7 @@ class _ProductWrite {
   String sku;
   Prices prices;
   int quantity;
+  int? reorderLevel;
   String description;
 
   _ProductWrite({
@@ -352,6 +364,7 @@ class _ProductWrite {
     required this.sku,
     required this.prices,
     required this.quantity,
+    required this.reorderLevel,
     required this.description,
   });
 }
@@ -408,6 +421,7 @@ ImportPlan buildPlan({
       final qty = row.quantity ?? 0;
       pending.quantity = mode == QuantityMode.add ? pending.quantity + qty : (row.quantity ?? pending.quantity);
       pending.prices = pending.prices.mergedWith(row.prices);
+      if (row.reorderLevel != null) pending.reorderLevel = row.reorderLevel;
       if (row.description.isNotEmpty) pending.description = row.description;
       pending.name = row.product;
       results.add(RowResult(
@@ -424,6 +438,7 @@ ImportPlan buildPlan({
         sku: row.sku.isNotEmpty ? row.sku : existing.sku,
         prices: existing.prices.mergedWith(row.prices), // empty cells keep the current price
         quantity: qty,
+        reorderLevel: row.reorderLevel ?? existing.reorderLevel,
         description: row.description.isNotEmpty ? row.description : existing.description,
       );
       results.add(RowResult(row, RowStatus.update, 'Qty ${existing.quantity} → $qty'));
@@ -434,6 +449,7 @@ ImportPlan buildPlan({
         sku: row.sku,
         prices: row.prices,
         quantity: row.quantity ?? 0,
+        reorderLevel: row.reorderLevel,
         description: row.description,
       );
       results.add(RowResult(row, RowStatus.newProduct, 'New'));
@@ -464,6 +480,7 @@ Future<void> runImport(ImportPlan plan, {void Function(double progress)? onProgr
         'sku': p.sku,
         'retailPrice': p.prices.retail,
         'quantity': p.quantity,
+        'reorderLevel': p.reorderLevel,
         'description': p.description,
         'updatedAt': FieldValue.serverTimestamp(),
       };

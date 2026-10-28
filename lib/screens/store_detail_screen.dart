@@ -28,6 +28,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
   late Stream<List<StockRequest>> _pending = StockRequests.watchPending(storeId: widget.storeId);
   List<Product> _latest = const [];
   String _search = '';
+  bool _onlyNeedsOrdering = false;
   bool _deleting = false;
 
   Future<void> _refresh() => pullRefresh(context, Db.refresh, () {
@@ -113,6 +114,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
       }
     }
     if (match != null) {
+      showMessage(context, 'Product already exists: ${match.name} (stock ${match.quantity})');
       _openProduct(store, match, isAdmin: isAdmin);
       return;
     }
@@ -171,7 +173,9 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
               final q = _search.trim().toLowerCase();
               final products = (all ?? const <Product>[])
                   .where((p) => q.isEmpty || p.name.toLowerCase().contains(q) || p.sku.toLowerCase().contains(q))
+                  .where((p) => !_onlyNeedsOrdering || p.needsOrdering)
                   .toList();
+              final needOrdering = (all ?? const <Product>[]).where((p) => p.needsOrdering).length;
               final totalUnits = (all ?? const <Product>[]).fold<int>(0, (sum, p) => sum + p.quantity);
               final totalValue = (all ?? const <Product>[]).fold<double>(0, (sum, p) => sum + p.value);
 
@@ -303,6 +307,14 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                             style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                           ),
                         ),
+                      if (needOrdering > 0) ...[
+                        const SizedBox(height: 12),
+                        NeedsOrderingBanner(
+                          count: needOrdering,
+                          active: _onlyNeedsOrdering,
+                          onTap: () => setState(() => _onlyNeedsOrdering = !_onlyNeedsOrdering),
+                        ),
+                      ],
                       const SizedBox(height: 16),
                       TextField(
                         decoration:
@@ -315,7 +327,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                       else if (all == null)
                         const Loading()
                       else if (products.isEmpty)
-                        q.isEmpty
+                        q.isEmpty && !_onlyNeedsOrdering
                             ? EmptyState(
                                 icon: Icons.inventory_2_outlined,
                                 title: 'No products yet',
@@ -384,11 +396,24 @@ class _ProductCard extends StatelessWidget {
 
     final qtyText = Text(
       count(p.quantity),
-      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: p.quantity == 0 ? scheme.error : null),
+      style: TextStyle(
+        fontSize: 18,
+        fontWeight: FontWeight.w700,
+        color: p.isOutOfStock ? scheme.error : (p.needsOrdering ? StockColors.lowText : null),
+      ),
     );
+
+    // Highlight low / out-of-stock products.
+    final Color? cardColor =
+        p.isOutOfStock ? scheme.errorContainer.withValues(alpha: 0.55) : (p.needsOrdering ? StockColors.lowBg : null);
+    final BorderSide? border = p.isOutOfStock
+        ? BorderSide(color: scheme.error, width: 1.5)
+        : (p.needsOrdering ? const BorderSide(color: StockColors.lowBorder, width: 1.5) : null);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
+      color: cardColor,
+      shape: border == null ? null : RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: border),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
@@ -406,6 +431,11 @@ class _ProductCard extends StatelessWidget {
                       Padding(
                         padding: const EdgeInsets.only(top: 2),
                         child: Text(details, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13)),
+                      ),
+                    if (p.needsOrdering)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: StockStatusChip(product: p),
                       ),
                     if (pending.isNotEmpty)
                       Padding(

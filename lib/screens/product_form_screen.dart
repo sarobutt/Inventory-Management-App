@@ -36,6 +36,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
   static String _fmt(double? v) => v == null ? '' : v.toStringAsFixed(2);
   late final _quantity = TextEditingController(text: '${widget.product?.quantity ?? 0}');
+  late final _reorder = TextEditingController(text: widget.product?.reorderLevel?.toString() ?? '');
   late final _description = TextEditingController(text: widget.product?.description ?? '');
   bool _saving = false;
 
@@ -81,32 +82,17 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     if (!mounted) return;
     setState(() => _lookingUp = false);
 
-    // Already in this store? Offer to open it instead of creating a duplicate.
+    // Already in this store? Don't allow a duplicate: offer to open the existing product.
     final existing = info.existing;
     if (existing != null && existing.storeId == widget.storeId && existing.id != widget.product?.id) {
-      final open = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Already in this store'),
-          content: Text('“${existing.name}” (quantity ${existing.quantity}) already uses this barcode in this store. '
-              'Open it instead?'),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Stay here')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Open product')),
-          ],
-        ),
-      );
-      if (open == true && mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => ProductFormScreen(companyId: widget.companyId, storeId: widget.storeId, product: existing),
-            fullscreenDialog: true,
-          ),
-        );
-        return;
+      await _promptExisting(existing);
+      if (mounted) {
+        setState(() {
+          _sku.text = widget.product?.sku ?? '';
+          _lookupNote = null;
+        });
       }
-      if (!mounted) return;
+      return;
     }
 
     setState(() {
@@ -139,6 +125,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     _wholesale.dispose();
     _perItem.dispose();
     _quantity.dispose();
+    _reorder.dispose();
     _description.dispose();
     super.dispose();
   }
@@ -155,18 +142,62 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     setState(() => _quantity.text = '$next');
   }
 
+  /// "Product already exists" prompt. Returns true if the user opened the existing product.
+  Future<bool> _promptExisting(Product existing) async {
+    final open = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.inventory_2_outlined),
+        title: const Text('Product already exists'),
+        content: Text(
+          '“${existing.name}” already has barcode/SKU ${existing.sku} in this store '
+          '(stock: ${existing.quantity}).\n\nEach barcode can only be added once per store.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Open existing product')),
+        ],
+      ),
+    );
+    if (open == true && mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ProductFormScreen(companyId: widget.companyId, storeId: widget.storeId, product: existing),
+          fullscreenDialog: true,
+        ),
+      );
+      return true;
+    }
+    return false;
+  }
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
     try {
       final name = _name.text.trim();
       final sku = _sku.text.trim();
+
+      // Block duplicate SKUs within this store.
+      if (sku.isNotEmpty) {
+        final existing = await Db.findInStoreBySku(widget.storeId, sku);
+        if (existing != null && existing.id != widget.product?.id) {
+          if (!mounted) return;
+          setState(() => _saving = false);
+          await _promptExisting(existing);
+          return;
+        }
+      }
+
       final prices = Prices(
         retail: _parsePrice(_retail.text),
         wholesale: _parsePrice(_wholesale.text),
         perItem: _parsePrice(_perItem.text),
       );
       final quantity = int.tryParse(_quantity.text.trim()) ?? 0;
+      final reorderText = _reorder.text.trim();
+      final reorderLevel = reorderText.isEmpty ? null : int.tryParse(reorderText);
       final description = _description.text.trim();
       if (_isEdit) {
         await Db.updateProduct(
@@ -177,6 +208,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           sku: sku,
           prices: prices,
           quantity: quantity,
+          reorderLevel: reorderLevel,
           description: description,
         );
       } else {
@@ -187,6 +219,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           sku: sku,
           prices: prices,
           quantity: quantity,
+          reorderLevel: reorderLevel,
           description: description,
         );
       }
@@ -340,6 +373,18 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _reorder,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: const InputDecoration(
+                labelText: 'Reorder level',
+                hintText: 'Default $defaultReorderLevel',
+                helperText: 'Shows “Needs ordering” when stock is at or below this number',
+                prefixIcon: Icon(Icons.notification_important_outlined),
+              ),
             ),
             const SizedBox(height: 16),
             TextFormField(

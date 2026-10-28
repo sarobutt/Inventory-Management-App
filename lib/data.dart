@@ -7,7 +7,7 @@ import 'auth.dart';
 // Data structure
 //   companies/{id}      name, description
 //   stores/{id}         companyId, name, address
-//   products/{id}       companyId, storeId, name, sku, retailPrice, quantity, description
+//   products/{id}       companyId, storeId, name, sku, retailPrice, quantity, reorderLevel, description
 //                       (everyone signed in can READ retailPrice; only admins can change it)
 //   productPrices/{id}  wholesale, perItem, companyId, storeId   (ADMIN ONLY; same id as the
 //                       product, so staff can never read wholesale or per-item prices)
@@ -83,6 +83,9 @@ class Prices {
       );
 }
 
+/// Stock at or below this level counts as "needs ordering" when a product has no own level.
+const int defaultReorderLevel = 5;
+
 class Product {
   final String id;
   final String companyId;
@@ -93,6 +96,9 @@ class Product {
   /// Retail for everyone; wholesale and per item are filled in for admins only.
   final Prices prices;
   final int quantity;
+
+  /// Low-stock alert level for this product (null = use [defaultReorderLevel]).
+  final int? reorderLevel;
   final String description;
 
   const Product({
@@ -103,8 +109,20 @@ class Product {
     required this.sku,
     this.prices = Prices.none,
     required this.quantity,
+    this.reorderLevel,
     required this.description,
   });
+
+  int get effectiveReorderLevel => reorderLevel ?? defaultReorderLevel;
+
+  /// No stock left.
+  bool get isOutOfStock => quantity <= 0;
+
+  /// Stock is at or below the reorder level (includes out of stock).
+  bool get needsOrdering => quantity <= effectiveReorderLevel;
+
+  /// Short status for tables: "Out of stock", "Needs ordering" or "".
+  String get stockStatus => isOutOfStock ? 'Out of stock' : (needsOrdering ? 'Needs ordering' : '');
 
   /// Stock value at retail price = retail x quantity (0 when no retail price).
   double get value => (prices.retail ?? 0) * quantity;
@@ -117,6 +135,7 @@ class Product {
         sku: sku,
         prices: p,
         quantity: quantity,
+        reorderLevel: reorderLevel,
         description: description,
       );
 
@@ -132,6 +151,7 @@ class Product {
       sku: (d['sku'] as String?) ?? '',
       prices: retail == null ? Prices.none : Prices(retail: retail),
       quantity: (d['quantity'] as num?)?.toInt() ?? 0,
+      reorderLevel: (d['reorderLevel'] as num?)?.toInt(),
       description: (d['description'] as String?) ?? '',
     );
   }
@@ -339,6 +359,7 @@ class Db {
     required String sku,
     required Prices prices,
     required int quantity,
+    required int? reorderLevel,
     required String description,
   }) {
     final ref = _products.doc();
@@ -350,6 +371,7 @@ class Db {
       'sku': sku,
       'retailPrice': prices.retail,
       'quantity': quantity,
+      'reorderLevel': reorderLevel,
       'description': description,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
@@ -366,6 +388,7 @@ class Db {
     required String sku,
     required Prices prices,
     required int quantity,
+    required int? reorderLevel,
     required String description,
   }) {
     final batch = _fs.batch();
@@ -375,6 +398,7 @@ class Db {
       'retailPrice': prices.retail,
       'price': FieldValue.delete(), // old single-price field, replaced by retailPrice
       'quantity': quantity,
+      'reorderLevel': reorderLevel,
       'description': description,
       'updatedAt': FieldValue.serverTimestamp(),
     });
@@ -418,6 +442,14 @@ class Db {
     batch.delete(_prices.doc(id));
     batch.delete(_products.doc(id));
     return batch.commit();
+  }
+
+  /// The product in [storeId] with this exact SKU/barcode, if any (used to prevent duplicates).
+  static Future<Product?> findInStoreBySku(String storeId, String sku) async {
+    final clean = sku.trim();
+    if (clean.isEmpty) return null;
+    final snap = await _products.where('storeId', isEqualTo: storeId).where('sku', isEqualTo: clean).limit(1).get();
+    return snap.docs.isEmpty ? null : Product.fromDoc(snap.docs.first);
   }
 
   /// Products (in any store) whose SKU/barcode exactly matches [sku].

@@ -1,5 +1,5 @@
-Product,SKU,Retail Price,Wholesale Price,Per Item Price,Quantity,Description
-Garnier Micellar Water 400ml,3600542024453,6.99,4.2,7.49,48,
-Nivea Soft Cream 200ml,4005808890507,4.5,2.75,4.99,36,Moisturising cream
-Maybelline Lash Sensational Mascara,3600531139582,11.99,7.1,12.99,24,
-Dove Original Deodorant 250ml,8710447313383,3.25,1.95,3.49,60,
+Product,SKU,Retail Price,Wholesale Price,Per Item Price,Quantity,Reorder Level,Description
+Garnier Micellar Water 400ml,3600542024453,6.99,4.2,7.49,48,10,
+Nivea Soft Cream 200ml,4005808890507,4.5,2.75,4.99,36,8,Moisturising cream
+Maybelline Lash Sensational Mascara,3600531139582,11.99,7.1,12.99,4,6,
+Dove Original Deodorant 250ml,8710447313383,3.25,1.95,3.49,60,,

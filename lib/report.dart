@@ -20,12 +20,16 @@ class TableData {
   /// Optional totals row (same length as headers).
   final List<String>? totals;
 
+  /// Optional per-row highlight: 0 = normal, 1 = needs ordering (amber), 2 = out of stock (red).
+  final List<int>? rowHighlights;
+
   const TableData({
     required this.title,
     required this.headers,
     required this.rows,
     this.numericColumns = const {},
     this.totals,
+    this.rowHighlights,
   });
 }
 
@@ -48,6 +52,7 @@ TableData _withoutColumns(TableData t, Set<int> drop) {
     rows: [for (final r in t.rows) keep(r)],
     numericColumns: numeric,
     totals: t.totals == null ? null : keep(t.totals!),
+    rowHighlights: t.rowHighlights,
   );
 }
 
@@ -100,7 +105,15 @@ TableData storesTable(List<Store> stores, List<Company> companies, List<Product>
   return showPrices ? t : _withoutColumns(t, {5});
 }
 
-TableData productsTable(List<Product> products, List<Company> companies, List<Store> stores, {bool showPrices = true}) {
+TableData productsTable(
+  List<Product> products,
+  List<Company> companies,
+  List<Store> stores, {
+  bool showPrices = true,
+  bool needsOrderingOnly = false,
+}) {
+  if (needsOrderingOnly) products = products.where((p) => p.needsOrdering).toList();
+  final highlights = <int>[];
   final companyName = {for (final c in companies) c.id: c.name};
   final storeName = {for (final s in stores) s.id: s.name};
   var tUnits = 0;
@@ -119,14 +132,19 @@ TableData productsTable(List<Product> products, List<Company> companies, List<St
       formatPrice(p.prices.perItem),
       count(p.quantity),
       money(p.value),
+      p.stockStatus,
     ]);
+    highlights.add(p.isOutOfStock ? 2 : (p.needsOrdering ? 1 : 0));
   }
   final t = TableData(
-    title: 'Products',
-    headers: const ['Product', 'SKU', 'Company', 'Store', 'Retail', 'Wholesale', 'Per item', 'Qty', 'Value (retail)'],
+    title: needsOrderingOnly ? 'Products to order' : 'Products',
+    headers: const [
+      'Product', 'SKU', 'Company', 'Store', 'Retail', 'Wholesale', 'Per item', 'Qty', 'Value (retail)', 'Stock status',
+    ],
     rows: rows,
     numericColumns: const {4, 5, 6, 7, 8},
-    totals: ['TOTAL', '', '', '', '', '', '', count(tUnits), money(tValue)],
+    totals: ['TOTAL', '', '', '', '', '', '', count(tUnits), money(tValue), ''],
+    rowHighlights: highlights,
   );
   // Staff keep Retail; wholesale, per item and value are hidden.
   return showPrices ? t : _withoutColumns(t, {5, 6, 8});

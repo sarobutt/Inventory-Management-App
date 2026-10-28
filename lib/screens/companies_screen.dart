@@ -122,6 +122,20 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                       ('Stores', count(stores.length)),
                       ('Units in stock', count(products.fold<int>(0, (sum, p) => sum + p.quantity))),
                     ]),
+                    if (products.any((p) => p.needsOrdering)) ...[
+                      const SizedBox(height: 12),
+                      NeedsOrderingBanner(
+                        count: products.where((p) => p.needsOrdering).length,
+                        active: false,
+                        actionLabel: 'View list',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const TablesScreen(initialTab: TableKind.products, needsOrderingOnly: true),
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 16),
                     TextField(
                       decoration: const InputDecoration(

@@ -32,9 +32,9 @@ App
 
 Columns (the first row must contain the headings, in any order):
 
-| Product | SKU | Retail Price | Wholesale Price | Per Item Price | Quantity | Description |
-|---|---|---|---|---|---|---|
-| Nivea Soft Cream 200ml | 4005808890507 | 4.50 | 2.75 | 4.99 | 36 | |
+| Product | SKU | Retail Price | Wholesale Price | Per Item Price | Quantity | Reorder Level | Description |
+|---|---|---|---|---|---|---|---|
+| Nivea Soft Cream 200ml | 4005808890507 | 4.50 | 2.75 | 4.99 | 36 | 8 | |
 
 Only **Product** is required. Common alternative headings also work (Name, Item, Code, Barcode, Price/RRP for retail, Trade/Cost for wholesale, Unit Price/Each for per item, Qty, Stock). Empty price cells keep the product's current price. Ready-made templates are in [`templates/`](templates/). Old `.xls` files must be re-saved as `.xlsx`.
 
@@ -47,6 +47,14 @@ Only **Product** is required. Common alternative headings also work (Name, Item,
 | **Per item** | View and change | Hidden |
 
 Wholesale and per-item prices are stored in a separate, admin-only part of the database (`productPrices`), so staff can't read them even with technical tools. Stock value is calculated at retail price. If you used the app before this change, each product's old single price becomes its **Retail** price automatically the first time an admin opens the app.
+
+**No duplicate products:** each barcode/SKU can only be used once per store. Scanning or typing a barcode that already exists in that store shows **"Product already exists"**, with an option to open the existing product, and saving a duplicate is blocked. The same product can still exist in different stores, each with its own stock. Excel imports update the existing product instead of creating a copy.
+
+**Low stock and reordering:** each product has a **Reorder level** (default 5 if left empty).
+- Stock **at or below** the level: the product card turns **amber**, labelled **"Needs ordering"**.
+- Stock at **0**: the card turns **red**, labelled **"Out of stock: order now"**.
+- The home screen, company pages and store pages show "**N products need ordering**". Tap it to see just those items.
+- In **Tables → Products**, turn on **Needs ordering only** to get a reorder list you can print or share as a PDF. Low and out-of-stock rows are highlighted, with a **Stock status** column.
 
 **Barcode scanning:** when adding or editing a product, tap **Scan barcode** (or the scan icon in the SKU field). The barcode number goes into **SKU**, and the product name is looked up automatically, in this order:
 1. **Your own products** in any store (also fills in price and description). This has no limit.

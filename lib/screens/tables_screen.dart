@@ -16,7 +16,16 @@ class TablesScreen extends StatefulWidget {
   final String? storeId;
   final TableKind initialTab;
 
-  const TablesScreen({super.key, this.companyId, this.storeId, this.initialTab = TableKind.companies});
+  /// Start with the Products table showing only items that need ordering.
+  final bool needsOrderingOnly;
+
+  const TablesScreen({
+    super.key,
+    this.companyId,
+    this.storeId,
+    this.initialTab = TableKind.companies,
+    this.needsOrderingOnly = false,
+  });
 
   @override
   State<TablesScreen> createState() => _TablesScreenState();
@@ -34,6 +43,7 @@ class _TablesScreenState extends State<TablesScreen> with SingleTickerProviderSt
 
   late String? _companyId = widget.companyId;
   late String? _storeId = widget.storeId;
+  late bool _needsOrderingOnly = widget.needsOrderingOnly;
   bool _busy = false;
 
   @override
@@ -103,7 +113,8 @@ class _TablesScreenState extends State<TablesScreen> with SingleTickerProviderSt
       case TableKind.stores:
         return storesTable(stores, _companies!, products, showPrices: showPrices);
       case TableKind.products:
-        return productsTable(products, _companies!, _stores!, showPrices: showPrices);
+        return productsTable(products, _companies!, _stores!,
+            showPrices: showPrices, needsOrderingOnly: _needsOrderingOnly);
     }
   }
 
@@ -155,6 +166,19 @@ class _TablesScreenState extends State<TablesScreen> with SingleTickerProviderSt
               : Column(
                   children: [
                     _filters(),
+                    if (_tabs.index == TableKind.products.index)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: FilterChip(
+                            avatar: const Icon(Icons.warning_amber_rounded, size: 18),
+                            label: const Text('Needs ordering only'),
+                            selected: _needsOrderingOnly,
+                            onSelected: (v) => setState(() => _needsOrderingOnly = v),
+                          ),
+                        ),
+                      ),
                     Expanded(
                       child: TabBarView(
                         controller: _tabs,
@@ -249,6 +273,13 @@ class _TableView extends StatelessWidget {
   final Future<void> Function() onRefresh;
   const _TableView({required this.data, required this.onRefresh});
 
+  WidgetStateProperty<Color?>? _rowColor(BuildContext context, int row) {
+    final level = (data.rowHighlights != null && row < data.rowHighlights!.length) ? data.rowHighlights![row] : 0;
+    if (level == 2) return WidgetStatePropertyAll(Theme.of(context).colorScheme.errorContainer);
+    if (level == 1) return const WidgetStatePropertyAll(StockColors.lowBg);
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     if (data.rows.isEmpty) {
@@ -290,8 +321,11 @@ class _TableView extends StatelessWidget {
                 DataColumn(label: Text(data.headers[i]), numeric: data.numericColumns.contains(i)),
             ],
             rows: [
-              for (final r in data.rows)
-                DataRow(cells: [for (var i = 0; i < r.length; i++) cell(r[i], i)]),
+              for (var ri = 0; ri < data.rows.length; ri++)
+                DataRow(
+                  color: _rowColor(context, ri),
+                  cells: [for (var i = 0; i < data.rows[ri].length; i++) cell(data.rows[ri][i], i)],
+                ),
               if (data.totals != null)
                 DataRow(
                   color: WidgetStatePropertyAll(scheme.surfaceContainerHighest),
