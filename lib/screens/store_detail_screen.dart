@@ -376,8 +376,9 @@ class _ProductCard extends StatelessWidget {
     final p = product;
     final details = [
       if (p.sku.isNotEmpty) 'SKU ${p.sku}',
-      if (isAdmin && p.price != null) formatPrice(p.price),
-      if (isAdmin && p.price != null) 'Value ${money(p.value)}',
+      if (p.prices.retail != null) 'Retail ${formatPrice(p.prices.retail)}',
+      if (isAdmin && p.prices.wholesale != null) 'Wholesale ${formatPrice(p.prices.wholesale)}',
+      if (isAdmin && p.prices.perItem != null) 'Per item ${formatPrice(p.prices.perItem)}',
     ].join(' · ');
     final pendingText = pending.map((d) => d > 0 ? '+$d' : '$d').join(', ');
 

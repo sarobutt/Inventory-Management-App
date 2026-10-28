@@ -168,7 +168,9 @@ class _ImportScreenState extends State<ImportScreen> {
     const columns = [
       ('Product', 'Required'),
       ('SKU', 'Optional, used to match existing products'),
-      ('Price', 'Optional, e.g. 4.99'),
+      ('Retail Price', 'Optional, e.g. 4.99 (staff can see)'),
+      ('Wholesale Price', 'Optional (admins only)'),
+      ('Per Item Price', 'Optional (admins only)'),
       ('Quantity', 'Optional, stock count'),
       ('Description', 'Optional'),
     ];
@@ -187,7 +189,7 @@ class _ImportScreenState extends State<ImportScreen> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(width: 120, child: Text(c.$1, style: const TextStyle(fontWeight: FontWeight.w600))),
+                    SizedBox(width: 130, child: Text(c.$1, style: const TextStyle(fontWeight: FontWeight.w600))),
                     Expanded(child: Text(c.$2, style: TextStyle(color: muted))),
                   ],
                 ),
@@ -253,7 +255,9 @@ class _ImportScreenState extends State<ImportScreen> {
             DataColumn(label: Text('Status')),
             DataColumn(label: Text('Product')),
             DataColumn(label: Text('SKU')),
-            DataColumn(label: Text('Price'), numeric: true),
+            DataColumn(label: Text('Retail'), numeric: true),
+            DataColumn(label: Text('Wholesale'), numeric: true),
+            DataColumn(label: Text('Per item'), numeric: true),
             DataColumn(label: Text('Qty'), numeric: true),
           ],
           rows: [
@@ -279,7 +283,9 @@ class _ImportScreenState extends State<ImportScreen> {
                   )),
                   DataCell(Text(r.row.product)),
                   DataCell(Text(r.row.sku)),
-                  DataCell(Text(formatPrice(r.row.price))),
+                  DataCell(Text(formatPrice(r.row.prices.retail))),
+                  DataCell(Text(formatPrice(r.row.prices.wholesale))),
+                  DataCell(Text(formatPrice(r.row.prices.perItem))),
                   DataCell(Text(r.row.quantity == null ? '' : count(r.row.quantity!))),
                 ],
               ),

@@ -67,7 +67,7 @@ TableData companiesTable(List<Company> companies, List<Store> stores, List<Produ
   }
   final t = TableData(
     title: 'Companies',
-    headers: const ['Company', 'Description', 'Stores', 'Products', 'Units', 'Stock value'],
+    headers: const ['Company', 'Description', 'Stores', 'Products', 'Units', 'Stock value (retail)'],
     rows: rows,
     numericColumns: const {2, 3, 4, 5},
     totals: ['TOTAL', '', count(tStores), count(tProducts), count(tUnits), money(tValue)],
@@ -91,7 +91,7 @@ TableData storesTable(List<Store> stores, List<Company> companies, List<Product>
   }
   final t = TableData(
     title: 'Stores',
-    headers: const ['Store', 'Company', 'Address', 'Products', 'Units', 'Stock value'],
+    headers: const ['Store', 'Company', 'Address', 'Products', 'Units', 'Stock value (retail)'],
     rows: rows,
     numericColumns: const {3, 4, 5},
     totals: ['TOTAL', '', '', count(tProducts), count(tUnits), money(tValue)],
@@ -113,19 +113,22 @@ TableData productsTable(List<Product> products, List<Company> companies, List<St
       p.sku,
       companyName[p.companyId] ?? '',
       storeName[p.storeId] ?? '',
-      formatPrice(p.price),
+      formatPrice(p.prices.retail),
+      formatPrice(p.prices.wholesale),
+      formatPrice(p.prices.perItem),
       count(p.quantity),
       money(p.value),
     ]);
   }
   final t = TableData(
     title: 'Products',
-    headers: const ['Product', 'SKU', 'Company', 'Store', 'Price', 'Qty', 'Value'],
+    headers: const ['Product', 'SKU', 'Company', 'Store', 'Retail', 'Wholesale', 'Per item', 'Qty', 'Value (retail)'],
     rows: rows,
-    numericColumns: const {4, 5, 6},
-    totals: ['TOTAL', '', '', '', '', count(tUnits), money(tValue)],
+    numericColumns: const {4, 5, 6, 7, 8},
+    totals: ['TOTAL', '', '', '', '', '', '', count(tUnits), money(tValue)],
   );
-  return showPrices ? t : _withoutColumns(t, {4, 6});
+  // Staff keep Retail; wholesale, per item and value are hidden.
+  return showPrices ? t : _withoutColumns(t, {5, 6, 8});
 }
 
 // ---------------- PDF / printing ----------------

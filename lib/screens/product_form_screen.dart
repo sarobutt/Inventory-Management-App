@@ -30,9 +30,11 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   final _formKey = GlobalKey<FormState>();
   late final _name = TextEditingController(text: widget.product?.name ?? '');
   late final _sku = TextEditingController(text: widget.product?.sku ?? '');
-  late final _price = TextEditingController(
-    text: widget.product?.price == null ? '' : widget.product!.price!.toStringAsFixed(2),
-  );
+  late final _retail = TextEditingController(text: _fmt(widget.product?.prices.retail));
+  late final _wholesale = TextEditingController(text: _fmt(widget.product?.prices.wholesale));
+  late final _perItem = TextEditingController(text: _fmt(widget.product?.prices.perItem));
+
+  static String _fmt(double? v) => v == null ? '' : v.toStringAsFixed(2);
   late final _quantity = TextEditingController(text: '${widget.product?.quantity ?? 0}');
   late final _description = TextEditingController(text: widget.product?.description ?? '');
   bool _saving = false;
@@ -118,7 +120,12 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       } else if (_name.text.trim() != info.name) {
         _suggestedName = info.name;
       }
-      if (_price.text.trim().isEmpty && info.price != null) _price.text = info.price!.toStringAsFixed(2);
+      final found = info.prices;
+      if (found != null) {
+        if (_retail.text.trim().isEmpty && found.retail != null) _retail.text = _fmt(found.retail);
+        if (_wholesale.text.trim().isEmpty && found.wholesale != null) _wholesale.text = _fmt(found.wholesale);
+        if (_perItem.text.trim().isEmpty && found.perItem != null) _perItem.text = _fmt(found.perItem);
+      }
       if (_description.text.trim().isEmpty && info.description != null) _description.text = info.description!;
       _lookupNote = 'Found in ${info.source}: ${info.name}';
     });
@@ -128,7 +135,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   void dispose() {
     _name.dispose();
     _sku.dispose();
-    _price.dispose();
+    _retail.dispose();
+    _wholesale.dispose();
+    _perItem.dispose();
     _quantity.dispose();
     _description.dispose();
     super.dispose();
@@ -152,15 +161,21 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     try {
       final name = _name.text.trim();
       final sku = _sku.text.trim();
-      final price = _parsePrice(_price.text);
+      final prices = Prices(
+        retail: _parsePrice(_retail.text),
+        wholesale: _parsePrice(_wholesale.text),
+        perItem: _parsePrice(_perItem.text),
+      );
       final quantity = int.tryParse(_quantity.text.trim()) ?? 0;
       final description = _description.text.trim();
       if (_isEdit) {
         await Db.updateProduct(
           widget.product!.id,
+          companyId: widget.companyId,
+          storeId: widget.storeId,
           name: name,
           sku: sku,
-          price: price,
+          prices: prices,
           quantity: quantity,
           description: description,
         );
@@ -170,7 +185,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           storeId: widget.storeId,
           name: name,
           sku: sku,
-          price: price,
+          prices: prices,
           quantity: quantity,
           description: description,
         );
@@ -204,6 +219,18 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       if (mounted) showError(context, e);
     }
   }
+
+  Widget _priceField(TextEditingController controller, String label) => TextFormField(
+        controller: controller,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        decoration: InputDecoration(labelText: label, hintText: 'Optional', prefixText: '£ '),
+        validator: (v) {
+          if (v == null || v.trim().isEmpty) return null;
+          final p = _parsePrice(v);
+          if (p == null || p < 0) return 'Invalid price';
+          return null;
+        },
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -272,21 +299,31 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             ),
             const SizedBox(height: 16),
             Row(
+              children: [
+                const Icon(Icons.lock_outline, size: 16),
+                const SizedBox(width: 6),
+                Text('Prices (only admins can change these)', style: Theme.of(context).textTheme.labelLarge),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Staff can see the Retail price only. Wholesale and Per item are visible to admins only.',
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 13),
+            ),
+            const SizedBox(height: 10),
+            Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: _price,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(labelText: 'Price', hintText: 'Optional', prefixText: '£ '),
-                    validator: (v) {
-                      if (v == null || v.trim().isEmpty) return null;
-                      final p = _parsePrice(v);
-                      if (p == null || p < 0) return 'Invalid price';
-                      return null;
-                    },
-                  ),
-                ),
+                Expanded(child: _priceField(_retail, 'Retail')),
+                const SizedBox(width: 12),
+                Expanded(child: _priceField(_wholesale, 'Wholesale')),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: _priceField(_perItem, 'Per item')),
                 const SizedBox(width: 12),
                 Expanded(
                   child: TextFormField(

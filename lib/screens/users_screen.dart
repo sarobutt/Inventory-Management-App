@@ -213,7 +213,7 @@ class _UserFormScreenState extends State<UserFormScreen> {
             Text(
               _role == Role.admin
                   ? 'Full access, including prices, approvals and managing users.'
-                  : 'Can view stock and print tables (no prices). Stock changes are sent to an admin for approval.',
+                  : 'Can view stock, retail prices and print tables. Can’t see wholesale or per-item prices. Stock changes are sent to an admin for approval.',
               style: TextStyle(color: muted, fontSize: 13),
             ),
             if (_isEdit) ...[

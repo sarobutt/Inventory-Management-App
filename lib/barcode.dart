@@ -3,13 +3,14 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'auth.dart';
 import 'data.dart';
 
 /// What we found for a scanned barcode.
 class BarcodeInfo {
   final String code;
   final String? name;
-  final double? price; // only known from your own products
+  final Prices? prices; // only known from your own products (wholesale/per item for admins only)
   final String? description;
   final String source; // shown to the user, e.g. "Open Beauty Facts"
 
@@ -19,7 +20,7 @@ class BarcodeInfo {
   const BarcodeInfo({
     required this.code,
     this.name,
-    this.price,
+    this.prices,
     this.description,
     required this.source,
     this.existing,
@@ -29,7 +30,7 @@ class BarcodeInfo {
 }
 
 /// Looks up a barcode, cheapest and most reliable first:
-///   1. your own products (any store)   — unlimited, includes price
+///   1. your own products (any store)   — unlimited, includes prices (admins)
 ///   2. Open Beauty Facts               — free, unlimited, cosmetics & personal care
 ///   3. UPCitemdb (trial)                — free ~100 lookups/day, general retail
 /// Returns a result with name == null if nobody knows the barcode.
@@ -43,10 +44,16 @@ Future<BarcodeInfo> lookupBarcode(String code, {String? preferStoreId}) async {
       // Prefer a match from the current store, otherwise any store.
       final inStore = matches.where((p) => p.storeId == preferStoreId);
       final p = inStore.isNotEmpty ? inStore.first : matches.first;
+      var prices = p.prices.retailOnly;
+      if (currentUser.value?.isAdmin ?? false) {
+        try {
+          prices = prices.withAdmin(await Db.getAdminPrices(p.id));
+        } catch (_) {}
+      }
       return BarcodeInfo(
         code: clean,
         name: p.name,
-        price: p.price,
+        prices: prices,
         description: p.description.isEmpty ? null : p.description,
         source: 'your products',
         existing: p,

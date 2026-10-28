@@ -32,11 +32,21 @@ App
 
 Columns (the first row must contain the headings, in any order):
 
-| Product | SKU | Price | Quantity | Description |
-|---|---|---|---|---|
-| Blue Widget | AC-001 | 4.99 | 120 | Standard size |
+| Product | SKU | Retail Price | Wholesale Price | Per Item Price | Quantity | Description |
+|---|---|---|---|---|---|---|
+| Nivea Soft Cream 200ml | 4005808890507 | 4.50 | 2.75 | 4.99 | 36 | |
 
-Only **Product** is required. Common alternative headings also work (Name, Item, Code, Barcode, Cost, Qty, Stock). Ready-made templates are in [`templates/`](templates/). Old `.xls` files must be re-saved as `.xlsx`.
+Only **Product** is required. Common alternative headings also work (Name, Item, Code, Barcode, Price/RRP for retail, Trade/Cost for wholesale, Unit Price/Each for per item, Qty, Stock). Empty price cells keep the product's current price. Ready-made templates are in [`templates/`](templates/). Old `.xls` files must be re-saved as `.xlsx`.
+
+**Three prices per product:**
+
+| Price | Admin | Staff |
+|---|---|---|
+| **Retail** | View and change | **View only** (on product cards and in tables/PDFs) |
+| **Wholesale** | View and change | Hidden |
+| **Per item** | View and change | Hidden |
+
+Wholesale and per-item prices are stored in a separate, admin-only part of the database (`productPrices`), so staff can't read them even with technical tools. Stock value is calculated at retail price. If you used the app before this change, each product's old single price becomes its **Retail** price automatically the first time an admin opens the app.
 
 **Barcode scanning:** when adding or editing a product, tap **Scan barcode** (or the scan icon in the SKU field). The barcode number goes into **SKU**, and the product name is looked up automatically, in this order:
 1. **Your own products** in any store (also fills in price and description). This has no limit.

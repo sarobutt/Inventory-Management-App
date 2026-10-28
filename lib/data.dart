@@ -1,9 +1,16 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'auth.dart';
+
 // Data structure
-//   companies/{id}  name, description
-//   stores/{id}     companyId, name, address
-//   products/{id}   companyId, storeId, name, sku, price, quantity, description
+//   companies/{id}      name, description
+//   stores/{id}         companyId, name, address
+//   products/{id}       companyId, storeId, name, sku, retailPrice, quantity, description
+//                       (everyone signed in can READ retailPrice; only admins can change it)
+//   productPrices/{id}  wholesale, perItem, companyId, storeId   (ADMIN ONLY; same id as the
+//                       product, so staff can never read wholesale or per-item prices)
 
 // ---------------- Models ----------------
 
@@ -43,13 +50,48 @@ class Store {
   }
 }
 
+/// The three selling prices of a product.
+/// Retail: visible to everyone. Wholesale and per item: admins only. Only admins can change prices.
+class Prices {
+  final double? retail;
+  final double? wholesale;
+  final double? perItem;
+
+  const Prices({this.retail, this.wholesale, this.perItem});
+
+  static const none = Prices();
+
+  bool get isEmpty => retail == null && wholesale == null && perItem == null;
+
+  /// Reads the admin-only price record (wholesale + per item).
+  factory Prices.fromAdminDoc(Map<String, dynamic>? d) {
+    if (d == null) return none;
+    double? n(Object? v) => (v as num?)?.toDouble();
+    return Prices(wholesale: n(d['wholesale']), perItem: n(d['perItem']));
+  }
+
+  /// Keeps this retail price and takes wholesale/per item from [admin].
+  Prices withAdmin(Prices admin) => Prices(retail: retail, wholesale: admin.wholesale, perItem: admin.perItem);
+
+  Prices get retailOnly => Prices(retail: retail);
+
+  /// Keeps this price where [other] has none (used by imports and barcode fills).
+  Prices mergedWith(Prices other) => Prices(
+        retail: other.retail ?? retail,
+        wholesale: other.wholesale ?? wholesale,
+        perItem: other.perItem ?? perItem,
+      );
+}
+
 class Product {
   final String id;
   final String companyId;
   final String storeId;
   final String name;
   final String sku;
-  final double? price;
+
+  /// Retail for everyone; wholesale and per item are filled in for admins only.
+  final Prices prices;
   final int quantity;
   final String description;
 
@@ -59,27 +101,74 @@ class Product {
     required this.storeId,
     required this.name,
     required this.sku,
-    required this.price,
+    this.prices = Prices.none,
     required this.quantity,
     required this.description,
   });
 
-  /// Stock value = price x quantity (0 when no price).
-  double get value => (price ?? 0) * quantity;
+  /// Stock value at retail price = retail x quantity (0 when no retail price).
+  double get value => (prices.retail ?? 0) * quantity;
+
+  Product withPrices(Prices p) => Product(
+        id: id,
+        companyId: companyId,
+        storeId: storeId,
+        name: name,
+        sku: sku,
+        prices: p,
+        quantity: quantity,
+        description: description,
+      );
 
   factory Product.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final d = doc.data() ?? const <String, dynamic>{};
+    // Older versions stored a single 'price'; it becomes the retail price.
+    final retail = ((d['retailPrice'] ?? d['price']) as num?)?.toDouble();
     return Product(
       id: doc.id,
       companyId: (d['companyId'] as String?) ?? '',
       storeId: (d['storeId'] as String?) ?? '',
       name: (d['name'] as String?) ?? '',
       sku: (d['sku'] as String?) ?? '',
-      price: (d['price'] as num?)?.toDouble(),
+      prices: retail == null ? Prices.none : Prices(retail: retail),
       quantity: (d['quantity'] as num?)?.toInt() ?? 0,
       description: (d['description'] as String?) ?? '',
     );
   }
+}
+
+/// Combines the latest values of two streams (like rxdart's combineLatest2).
+Stream<R> combineLatest2<A, B, R>(Stream<A> a, Stream<B> b, R Function(A a, B b) combine) {
+  late final StreamController<R> controller;
+  StreamSubscription<A>? subA;
+  StreamSubscription<B>? subB;
+  A? lastA;
+  B? lastB;
+  var hasA = false, hasB = false;
+
+  void emit() {
+    if (hasA && hasB) controller.add(combine(lastA as A, lastB as B));
+  }
+
+  controller = StreamController<R>(
+    onListen: () {
+      subA = a.listen((v) {
+        lastA = v;
+        hasA = true;
+        emit();
+      }, onError: controller.addError);
+      subB = b.listen((v) {
+        lastB = v;
+        hasB = true;
+        emit();
+      }, onError: controller.addError);
+    },
+    onCancel: () async {
+      await subA?.cancel();
+      await subB?.cancel();
+    },
+  );
+  return controller.stream;
 }
 
 int _byName(String a, String b) => a.toLowerCase().compareTo(b.toLowerCase());
@@ -93,12 +182,20 @@ class Db {
   static CollectionReference<Map<String, dynamic>> get _companies => _fs.collection('companies');
   static CollectionReference<Map<String, dynamic>> get _stores => _fs.collection('stores');
   static CollectionReference<Map<String, dynamic>> get _products => _fs.collection('products');
+  static CollectionReference<Map<String, dynamic>> get _prices => _fs.collection('productPrices');
+
+  static bool get _isAdmin => currentUser.value?.isAdmin ?? false;
 
   /// Pulls the latest data from the server (used by pull-to-refresh).
   /// Throws if the device is offline.
   static Future<void> refresh() async {
     const server = GetOptions(source: Source.server);
-    await Future.wait([_companies.get(server), _stores.get(server), _products.get(server)]);
+    await Future.wait([
+      _companies.get(server),
+      _stores.get(server),
+      _products.get(server),
+      if (_isAdmin) _prices.get(server),
+    ]);
   }
 
   /// Deletes many documents safely (Firestore batches are limited to 500 writes).
@@ -138,11 +235,12 @@ class Db {
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
-  /// Deletes the company together with all of its stores and products.
+  /// Deletes the company together with all of its stores, products and prices.
   static Future<void> deleteCompany(String id) async {
     final products = await _products.where('companyId', isEqualTo: id).get();
     final stores = await _stores.where('companyId', isEqualTo: id).get();
     await _deleteAll([
+      ...products.docs.map((d) => _prices.doc(d.id)),
       ...products.docs.map((d) => d.reference),
       ...stores.docs.map((d) => d.reference),
       _companies.doc(id),
@@ -181,66 +279,127 @@ class Db {
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
-  /// Deletes the store together with all of its products.
+  /// Deletes the store together with all of its products and their prices.
   static Future<void> deleteStore(String id) async {
     final products = await _products.where('storeId', isEqualTo: id).get();
-    await _deleteAll([...products.docs.map((d) => d.reference), _stores.doc(id)]);
+    await _deleteAll([
+      ...products.docs.map((d) => _prices.doc(d.id)),
+      ...products.docs.map((d) => d.reference),
+      _stores.doc(id),
+    ]);
   }
 
   // ----- Products -----
 
   /// Live list of products, optionally only for one company or one store.
+  /// For admins each product also carries its three prices.
   static Stream<List<Product>> watchProducts({String? companyId, String? storeId}) {
     Query<Map<String, dynamic>> q = _products;
+    Query<Map<String, dynamic>> pq = _prices;
     if (storeId != null) {
       q = q.where('storeId', isEqualTo: storeId);
+      pq = pq.where('storeId', isEqualTo: storeId);
     } else if (companyId != null) {
       q = q.where('companyId', isEqualTo: companyId);
+      pq = pq.where('companyId', isEqualTo: companyId);
     }
-    return q.snapshots().map((s) {
+    final products = q.snapshots().map((s) {
       final list = s.docs.map(Product.fromDoc).toList();
       list.sort((a, b) => _byName(a.name, b.name));
       return list;
     });
+    if (!_isAdmin) {
+      // Staff: retail price only.
+      return products.map((list) => [for (final p in list) p.withPrices(p.prices.retailOnly)]);
+    }
+    final adminPrices = pq.snapshots().map((s) => {for (final d in s.docs) d.id: Prices.fromAdminDoc(d.data())});
+    return combineLatest2<List<Product>, Map<String, Prices>, List<Product>>(
+      products,
+      adminPrices,
+      (list, priceMap) => [for (final p in list) p.withPrices(p.prices.withAdmin(priceMap[p.id] ?? Prices.none))],
+    );
   }
+
+  /// Admin: the wholesale and per-item prices of one product.
+  static Future<Prices> getAdminPrices(String productId) async =>
+      Prices.fromAdminDoc((await _prices.doc(productId).get()).data());
+
+  static Map<String, dynamic> _priceDoc(Prices prices, String companyId, String storeId) => {
+        'wholesale': prices.wholesale,
+        'perItem': prices.perItem,
+        'companyId': companyId,
+        'storeId': storeId,
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
 
   static Future<void> createProduct({
     required String companyId,
     required String storeId,
     required String name,
     required String sku,
-    required double? price,
+    required Prices prices,
     required int quantity,
     required String description,
-  }) =>
-      _products.add({
-        'companyId': companyId,
-        'storeId': storeId,
-        'name': name,
-        'sku': sku,
-        'price': price,
-        'quantity': quantity,
-        'description': description,
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+  }) {
+    final ref = _products.doc();
+    final batch = _fs.batch();
+    batch.set(ref, {
+      'companyId': companyId,
+      'storeId': storeId,
+      'name': name,
+      'sku': sku,
+      'retailPrice': prices.retail,
+      'quantity': quantity,
+      'description': description,
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    batch.set(_prices.doc(ref.id), _priceDoc(prices, companyId, storeId));
+    return batch.commit();
+  }
 
   static Future<void> updateProduct(
     String id, {
+    required String companyId,
+    required String storeId,
     required String name,
     required String sku,
-    required double? price,
+    required Prices prices,
     required int quantity,
     required String description,
-  }) =>
-      _products.doc(id).update({
-        'name': name,
-        'sku': sku,
-        'price': price,
-        'quantity': quantity,
-        'description': description,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+  }) {
+    final batch = _fs.batch();
+    batch.update(_products.doc(id), {
+      'name': name,
+      'sku': sku,
+      'retailPrice': prices.retail,
+      'price': FieldValue.delete(), // old single-price field, replaced by retailPrice
+      'quantity': quantity,
+      'description': description,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    batch.set(_prices.doc(id), _priceDoc(prices, companyId, storeId));
+    return batch.commit();
+  }
+
+  /// Admin, once per app start: renames the old single 'price' field to 'retailPrice'.
+  static Future<int> migrateLegacyPrices() async {
+    if (!_isAdmin) return 0;
+    final snap = await _products.where('price', isGreaterThanOrEqualTo: 0).get();
+    final docs = snap.docs.where((d) => d.data()['price'] is num).toList();
+    for (var i = 0; i < docs.length; i += 400) {
+      final batch = _fs.batch();
+      for (final d in docs.skip(i).take(400)) {
+        final data = d.data();
+        batch.update(d.reference, {
+          if (data['retailPrice'] == null) 'retailPrice': (data['price'] as num).toDouble(),
+          'price': FieldValue.delete(),
+        });
+      }
+      await batch.commit();
+    }
+    return docs.length;
+  }
 
   /// Stock counting: add or subtract units. Never goes below zero.
   static Future<void> adjustQuantity(String productId, int delta) {
@@ -254,7 +413,12 @@ class Db {
     });
   }
 
-  static Future<void> deleteProduct(String id) => _products.doc(id).delete();
+  static Future<void> deleteProduct(String id) {
+    final batch = _fs.batch();
+    batch.delete(_prices.doc(id));
+    batch.delete(_products.doc(id));
+    return batch.commit();
+  }
 
   /// Products (in any store) whose SKU/barcode exactly matches [sku].
   static Future<List<Product>> findBySku(String sku) async {

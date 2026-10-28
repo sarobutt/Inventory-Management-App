@@ -11,7 +11,7 @@ import 'data.dart';
 //  Import products into ONE store from Excel (.xlsx) or CSV.
 //
 //  Expected columns (header row, any order, case-insensitive):
-//    Product | SKU | Price | Quantity | Description
+//    Product | SKU | Retail Price | Wholesale Price | Per Item Price | Quantity | Description
 //  Only "Product" is required. Companies and stores are never created here.
 // =====================================================================
 
@@ -27,7 +27,7 @@ class ImportRow {
   final int line; // row number in the spreadsheet (1-based, incl. header)
   final String product;
   final String sku;
-  final double? price;
+  final Prices prices;
   final int? quantity;
   final String description;
   final String? error;
@@ -36,7 +36,7 @@ class ImportRow {
     required this.line,
     required this.product,
     required this.sku,
-    required this.price,
+    required this.prices,
     required this.quantity,
     required this.description,
     this.error,
@@ -207,12 +207,17 @@ List<List<String>> _readXlsx(Uint8List bytes) {
 //  Turning the grid into rows
 // ---------------------------------------------------------------------
 
-enum _Col { product, sku, price, quantity, description }
+enum _Col { product, sku, retail, wholesale, perItem, quantity, description }
 
 const Map<_Col, List<String>> _aliases = {
   _Col.product: ['product', 'productname', 'name', 'item', 'itemname'],
   _Col.sku: ['sku', 'code', 'productcode', 'itemcode', 'barcode', 'ref', 'reference'],
-  _Col.price: ['price', 'unitprice', 'cost', 'rrp', 'priceeach', 'sellingprice'],
+  _Col.retail: ['retailprice', 'retail', 'price', 'rrp', 'sellingprice', 'saleprice'],
+  _Col.wholesale: ['wholesaleprice', 'wholesale', 'trade', 'tradeprice', 'cost', 'costprice'],
+  _Col.perItem: [
+    'peritemprice', 'peritem', 'peritemsale', 'peritemsaleprice', 'itemprice', 'priceperitem',
+    'unitprice', 'priceeach', 'each', 'singleprice', 'singleitemprice',
+  ],
   _Col.quantity: ['quantity', 'qty', 'stock', 'count', 'units', 'stockcount', 'onhand', 'qtyinstock'],
   _Col.description: ['description', 'notes', 'details', 'comment', 'comments'],
 };
@@ -252,7 +257,7 @@ List<ImportRow> rowsFromGrid(List<List<String>> grid) {
   if (!colOf.containsKey(_Col.product)) {
     throw ImportException(
       'Could not find a "Product" column in the first row.\n'
-      'Expected headings: Product, SKU, Price, Quantity, Description.',
+      'Expected headings: Product, SKU, Retail Price, Wholesale Price, Per Item Price, Quantity, Description.',
     );
   }
 
@@ -267,19 +272,33 @@ List<ImportRow> rowsFromGrid(List<List<String>> grid) {
     final r = grid[i];
     if (r.every((c) => c.trim().isEmpty)) continue;
 
-    final priceText = cell(r, _Col.price);
     final qtyText = cell(r, _Col.quantity);
-    final price = parsePrice(priceText);
     final qty = parseQuantity(qtyText);
     final product = cell(r, _Col.product);
+
+    // Three prices; remember the first one that can't be read.
+    String? priceError;
+    double? readPrice(_Col c, String label) {
+      final text = cell(r, c);
+      if (text.isEmpty) return null;
+      final v = parsePrice(text);
+      if (v == null || v < 0) priceError ??= 'Invalid $label price "$text"';
+      return v;
+    }
+
+    final prices = Prices(
+      retail: readPrice(_Col.retail, 'retail'),
+      wholesale: readPrice(_Col.wholesale, 'wholesale'),
+      perItem: readPrice(_Col.perItem, 'per item'),
+    );
 
     String? error;
     if (product.isEmpty) {
       error = 'Product name is empty';
     } else if (product.length > 200) {
       error = 'Product name is too long';
-    } else if (priceText.isNotEmpty && (price == null || price < 0)) {
-      error = 'Invalid price "$priceText"';
+    } else if (priceError != null) {
+      error = priceError;
     } else if (qtyText.isNotEmpty && (qty == null || qty < 0)) {
       error = 'Invalid quantity "$qtyText"';
     }
@@ -288,7 +307,7 @@ List<ImportRow> rowsFromGrid(List<List<String>> grid) {
       line: i + 1,
       product: product,
       sku: cell(r, _Col.sku),
-      price: price,
+      prices: prices,
       quantity: qty,
       description: cell(r, _Col.description),
       error: error,
@@ -323,7 +342,7 @@ class _ProductWrite {
   final String? existingId; // null = new product
   String name;
   String sku;
-  double? price;
+  Prices prices;
   int quantity;
   String description;
 
@@ -331,7 +350,7 @@ class _ProductWrite {
     required this.existingId,
     required this.name,
     required this.sku,
-    required this.price,
+    required this.prices,
     required this.quantity,
     required this.description,
   });
@@ -388,7 +407,7 @@ ImportPlan buildPlan({
       // Same product appears again in the file.
       final qty = row.quantity ?? 0;
       pending.quantity = mode == QuantityMode.add ? pending.quantity + qty : (row.quantity ?? pending.quantity);
-      if (row.price != null) pending.price = row.price;
+      pending.prices = pending.prices.mergedWith(row.prices);
       if (row.description.isNotEmpty) pending.description = row.description;
       pending.name = row.product;
       results.add(RowResult(
@@ -403,7 +422,7 @@ ImportPlan buildPlan({
         existingId: existing.id,
         name: row.product,
         sku: row.sku.isNotEmpty ? row.sku : existing.sku,
-        price: row.price ?? existing.price,
+        prices: existing.prices.mergedWith(row.prices), // empty cells keep the current price
         quantity: qty,
         description: row.description.isNotEmpty ? row.description : existing.description,
       );
@@ -413,7 +432,7 @@ ImportPlan buildPlan({
         existingId: null,
         name: row.product,
         sku: row.sku,
-        price: row.price,
+        prices: row.prices,
         quantity: row.quantity ?? 0,
         description: row.description,
       );
@@ -428,33 +447,45 @@ ImportPlan buildPlan({
 //  Writing to Firestore
 // ---------------------------------------------------------------------
 
-/// Saves the planned products (in batches of 400).
+/// Saves the planned products. Each product is two writes (the product with its
+/// retail price, and the admin-only wholesale/per-item prices), so 200 per batch.
 Future<void> runImport(ImportPlan plan, {void Function(double progress)? onProgress}) async {
   final fs = FirebaseFirestore.instance;
   final writes = plan._writes.values.toList();
 
-  for (var i = 0; i < writes.length; i += 400) {
+  for (var i = 0; i < writes.length; i += 200) {
     final batch = fs.batch();
-    final chunk = writes.skip(i).take(400);
+    final chunk = writes.skip(i).take(200);
     for (final p in chunk) {
       final data = <String, dynamic>{
         'companyId': plan.companyId,
         'storeId': plan.storeId,
         'name': p.name,
         'sku': p.sku,
-        'price': p.price,
+        'retailPrice': p.prices.retail,
         'quantity': p.quantity,
         'description': p.description,
         'updatedAt': FieldValue.serverTimestamp(),
       };
+      final DocumentReference<Map<String, dynamic>> ref;
       if (p.existingId != null) {
-        batch.update(fs.collection('products').doc(p.existingId), data);
+        ref = fs.collection('products').doc(p.existingId);
+        data['price'] = FieldValue.delete(); // old single-price field
+        batch.update(ref, data);
       } else {
+        ref = fs.collection('products').doc();
         data['createdAt'] = FieldValue.serverTimestamp();
-        batch.set(fs.collection('products').doc(), data);
+        batch.set(ref, data);
       }
+      batch.set(fs.collection('productPrices').doc(ref.id), {
+        'wholesale': p.prices.wholesale,
+        'perItem': p.prices.perItem,
+        'companyId': plan.companyId,
+        'storeId': plan.storeId,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
     }
     await batch.commit();
-    if (onProgress != null) onProgress((i + 400).clamp(0, writes.length) / writes.length);
+    if (onProgress != null) onProgress((i + 200).clamp(0, writes.length) / writes.length);
   }
 }

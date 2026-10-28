@@ -2,9 +2,10 @@ rules_version = '2';
 
 // Inventory Management – security rules
 //
-//   Admin : full access (companies, stores, products, prices, approvals, users)
-//   Staff : read everything; create stock-change REQUESTS; cancel their own
-//           pending requests; edit their own name/phone. Nothing else.
+//   Admin : full access (companies, stores, products, all prices, approvals, users)
+//   Staff : read companies, stores, products and the RETAIL price; create stock-change
+//           REQUESTS; cancel their own pending requests; edit their own name/phone.
+//           Staff can never read wholesale or per-item prices (productPrices).
 //   Not signed in : can only look up a username to sign in, and check
 //           whether the first admin has been set up.
 
@@ -103,7 +104,16 @@ service cloud.firestore {
                             && request.resource.data.storeId is string
                             && exists(/databases/$(database)/documents/stores/$(request.resource.data.storeId))
                             && request.resource.data.quantity is int
-                            && request.resource.data.quantity >= 0;
+                            && request.resource.data.quantity >= 0
+                            && (!('retailPrice' in request.resource.data)
+                                || request.resource.data.retailPrice == null
+                                || (request.resource.data.retailPrice is number
+                                    && request.resource.data.retailPrice >= 0));
+    }
+
+    // Wholesale and per-item prices: admins only, for reading AND writing.
+    match /productPrices/{id} {
+      allow read, write: if isAdmin();
     }
 
     // ---------- stock change requests ----------
