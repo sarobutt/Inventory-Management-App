@@ -4,6 +4,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import 'brand.dart';
 import 'data.dart';
 import 'widgets.dart';
 
@@ -164,6 +165,8 @@ Future<Uint8List> buildPdf(TableData t, {String filterText = ''}) async {
       header: (ctx) => pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
+          pw.Text(appName.toUpperCase(),
+              style: pw.TextStyle(fontSize: 9, letterSpacing: 2, color: PdfColor.fromHex('#5B1F52'))),
           pw.Text(t.title, style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
           pw.SizedBox(height: 2),
           pw.Text(subtitle, style: pw.TextStyle(fontSize: 9, color: PdfColors.grey700)),
@@ -183,7 +186,7 @@ Future<Uint8List> buildPdf(TableData t, {String filterText = ''}) async {
             headers: t.headers,
             data: [...t.rows, if (t.totals != null) t.totals!],
             headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9, color: PdfColors.white),
-            headerDecoration: pw.BoxDecoration(color: PdfColor.fromHex('#2357D9')),
+            headerDecoration: pw.BoxDecoration(color: PdfColor.fromHex('#5B1F52')),
             cellStyle: pw.TextStyle(fontSize: 9),
             cellAlignments: align,
             headerAlignments: align,

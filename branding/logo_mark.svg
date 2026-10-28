@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F3D58C"/>
+      <stop offset="1" stop-color="#C9963F"/>
+    </linearGradient>
+    <linearGradient id="rose" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F7B9C6"/>
+      <stop offset="1" stop-color="#E07A93"/>
+    </linearGradient>
+  </defs>
+  <!-- Souq archway (ogee/Moorish arch) -->
+  <path d="M300 830 V480 C300 350 410 280 512 200 C614 280 724 350 724 480 V830"
+        fill="none" stroke="url(#gold)" stroke-width="40" stroke-linecap="butt" stroke-linejoin="round"/>
+  <!-- inner arch line -->
+  <path d="M350 830 V490 C350 385 440 325 512 265 C584 325 674 385 674 490 V830"
+        fill="none" stroke="url(#gold)" stroke-opacity="0.45" stroke-width="12" stroke-linecap="butt"/>
+  <!-- floor -->
+  <rect x="250" y="822" width="524" height="24" rx="12" fill="url(#gold)"/>
+  <!-- lipstick: bullet -->
+  <path d="M462 560 V430 Q462 410 478 400 L548 352 Q562 344 562 362 V560 Z" fill="url(#rose)"/>
+  <!-- collar -->
+  <rect x="448" y="552" width="128" height="58" rx="10" fill="url(#gold)"/>
+  <!-- case -->
+  <rect x="436" y="604" width="152" height="200" rx="18" fill="url(#gold)"/>
+  <rect x="452" y="622" width="18" height="164" rx="9" fill="#FFF3D6" fill-opacity="0.55"/>
+  <!-- sparkle -->
+  <path d="M640 330 L652 362 L684 374 L652 386 L640 418 L628 386 L596 374 L628 362 Z" fill="#FFF3D6"/>
+  <path d="M392 404 L399 422 L417 429 L399 436 L392 454 L385 436 L367 429 L385 422 Z" fill="#FFF3D6" fill-opacity="0.8"/>
+</svg>

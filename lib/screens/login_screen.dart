@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../auth.dart';
+import '../brand.dart';
 
 /// Username + password sign-in. If no admin exists yet, offers first-time setup.
 class LoginScreen extends StatefulWidget {
@@ -102,10 +103,9 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Icon(Icons.inventory_2_outlined, size: 56, color: scheme.primary),
-                    const SizedBox(height: 12),
-                    Text('Inventory Management',
-                        textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineSmall),
+                    const Center(child: BrandBadge(size: 112)),
+                    const SizedBox(height: 16),
+                    const BrandWordmark(fontSize: 30),
                     const SizedBox(height: 4),
                     Text('Sign in to continue',
                         textAlign: TextAlign.center, style: TextStyle(color: scheme.onSurfaceVariant)),
@@ -236,7 +236,7 @@ class _SetupAdminScreenState extends State<SetupAdminScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            const Text('This is the main account with full access. You can add staff accounts afterwards.'),
+            const Text('This is the main Beauty Souq account with full access. You can add staff accounts afterwards.'),
             const SizedBox(height: 20),
             TextFormField(
               controller: _name,

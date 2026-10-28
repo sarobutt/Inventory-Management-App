@@ -1,4 +1,4 @@
-# Inventory Management (Flutter + Firebase)
+# Beauty Souq: inventory app (Flutter + Firebase)
 
 A native Android and iOS app for managing **companies → stores → products**, with stock counting. Data is stored online in **Firebase Cloud Firestore** and syncs live across devices. No sign-in required.
 
@@ -133,6 +133,17 @@ open ios/Runner.xcworkspace
 
 In Xcode, go to **Runner → Signing & Capabilities**, choose your Apple ID as the Team, plug in your iPhone and press ▶. A free Apple ID works for testing on your own phone (the app expires after 7 days). Publishing to the App Store or TestFlight requires the Apple Developer Program ($99/year): use **Product → Archive** in Xcode.
 
+## Branding (Beauty Souq)
+
+The app is called **Beauty Souq**. Its logo is a souq (market) archway framing a lipstick, in plum, rose and gold. Source files are in [`branding/`](branding/).
+
+- **Inside the app** (sign-in screen, home screen, PDF headers, colours): this is already part of the code.
+- **Phone home-screen icon and name**: run this once on the Mac, from the project folder:
+  ```bash
+  ./scripts/apply_branding.sh
+  ```
+  It installs the icon on Android (including the round "adaptive" style) and iOS, and renames the app to "Beauty Souq". Then rebuild the app.
+
 ## Accounts and roles
 
 The app now requires signing in with a **username and password**. Each account also has an email attached behind the scenes, which is used for "Forgot password".
@@ -208,6 +219,7 @@ lib/main.dart                              app start + Firebase init
 lib/data.dart                              models + all Firestore CRUD + stock counting
 lib/report.dart                            table building + PDF print/share
 lib/importer.dart                          Excel/CSV reading, matching, bulk writes
+lib/brand.dart                             Beauty Souq name, colours and logo
 lib/auth.dart                              sign-in, profiles, roles, user management
 lib/requests.dart                          staff stock requests + admin approval
 lib/barcode.dart                           barcode lookup (own DB → Open Beauty Facts → UPCitemdb)

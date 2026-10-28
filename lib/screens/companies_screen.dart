@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../auth.dart';
+import '../brand.dart';
 import '../data.dart';
 import '../requests.dart';
 import '../widgets.dart';
@@ -39,7 +40,15 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
     final isAdmin = me?.isAdmin ?? false;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Inventory'),
+        titleSpacing: 12,
+        title: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            BrandBadge(size: 34),
+            SizedBox(width: 10),
+            Flexible(child: BrandWordmark(fontSize: 20)),
+          ],
+        ),
         actions: [
           _RequestsButton(isAdmin: isAdmin),
           IconButton(

@@ -1,0 +1,9 @@
+# Beauty Souq app icon. Applied by ./scripts/apply_branding.sh
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "branding/icon.png"
+  adaptive_icon_background: "branding/icon_background.png"
+  adaptive_icon_foreground: "branding/icon_foreground.png"
+  remove_alpha_ios: true
+  min_sdk_android: 21
