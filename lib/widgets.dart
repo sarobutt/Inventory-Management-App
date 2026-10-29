@@ -141,7 +141,7 @@ class SectionTitle extends StatelessWidget {
       );
 }
 
-/// A row of summary figures, e.g. Products 12 | Units 340 | Value £1,200.00
+/// A row of summary figures, e.g. Products 12 | Units 340 | Value QAR 1,200.00
 class StatsRow extends StatelessWidget {
   final List<(String label, String value)> stats;
   const StatsRow(this.stats, {super.key});
@@ -179,12 +179,15 @@ class StatsRow extends StatelessWidget {
   }
 }
 
-/// £1,234.50
+/// Currency used throughout the app (Qatari riyal).
+const String currencyCode = 'QAR';
+
+/// QAR 1,234.50
 String money(double value) {
   final fixed = value.toStringAsFixed(2);
   final parts = fixed.split('.');
   final whole = parts[0].replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => ',');
-  return '£$whole.${parts[1]}';
+  return '$currencyCode $whole.${parts[1]}';
 }
 
 String formatPrice(double? price) => price == null ? '' : money(price);
@@ -284,4 +287,14 @@ class NeedsOrderingBanner extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Reads a typed price such as "12.50", "QAR 1,250", "1,250.00 ر.ق" or "ريال 5".
+/// Returns null if empty or not a number.
+double? parseMoney(String raw) {
+  final t = raw
+      .replaceAll(RegExp('QAR|qar|ر\\.?ق|ريال|[£\$€\\s,]'), '')
+      .trim();
+  if (t.isEmpty) return null;
+  return double.tryParse(t);
 }

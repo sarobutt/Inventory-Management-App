@@ -34,9 +34,11 @@ Columns (the first row must contain the headings, in any order):
 
 | Product | SKU | Retail Price | Wholesale Price | Per Item Price | Quantity | Reorder Level | Description |
 |---|---|---|---|---|---|---|---|
-| Nivea Soft Cream 200ml | 4005808890507 | 4.50 | 2.75 | 4.99 | 36 | 8 | |
+| Nivea Soft Cream 200ml | 4005808890507 | 21.00 | 12.75 | 23.00 | 36 | 8 | |
 
 Only **Product** is required. Common alternative headings also work (Name, Item, Code, Barcode, Price/RRP for retail, Trade/Cost for wholesale, Unit Price/Each for per item, Qty, Stock). Empty price cells keep the product's current price. Ready-made templates are in [`templates/`](templates/). Old `.xls` files must be re-saved as `.xlsx`.
+
+**Currency:** all prices are in **Qatari riyal (QAR)**, e.g. *QAR 32.00*. Price boxes and Excel files also accept "QAR", "ر.ق" or plain numbers.
 
 **Three prices per product:**
 

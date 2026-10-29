@@ -7,6 +7,7 @@ import 'package:xml/xml.dart';
 
 import 'audit.dart';
 import 'data.dart';
+import 'widgets.dart';
 
 // =====================================================================
 //  Import products into ONE store from Excel (.xlsx) or CSV.
@@ -231,11 +232,7 @@ const Map<_Col, List<String>> _aliases = {
 
 String _norm(String s) => s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
 
-double? parsePrice(String raw) {
-  final t = raw.trim().replaceAll(RegExp(r'[£$€\s,]'), '');
-  if (t.isEmpty) return null;
-  return double.tryParse(t);
-}
+double? parsePrice(String raw) => parseMoney(raw);
 
 int? parseQuantity(String raw) {
   final t = raw.trim().replaceAll(RegExp(r'[\s,]'), '');

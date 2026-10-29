@@ -131,11 +131,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     super.dispose();
   }
 
-  double? _parsePrice(String text) {
-    final t = text.trim().replaceAll(',', '.').replaceAll('£', '');
-    if (t.isEmpty) return null;
-    return double.tryParse(t);
-  }
+  double? _parsePrice(String text) => parseMoney(text);
 
   void _step(int delta) {
     final current = int.tryParse(_quantity.text.trim()) ?? 0;
@@ -258,7 +254,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   Widget _priceField(TextEditingController controller, String label) => TextFormField(
         controller: controller,
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        decoration: InputDecoration(labelText: label, hintText: 'Optional', prefixText: '£ '),
+        decoration: InputDecoration(labelText: label, hintText: 'Optional', prefixText: '$currencyCode '),
         validator: (v) {
           if (v == null || v.trim().isEmpty) return null;
           final p = _parsePrice(v);
