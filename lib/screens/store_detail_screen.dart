@@ -6,6 +6,7 @@ import '../requests.dart';
 import '../widgets.dart';
 import 'audit_screen.dart';
 import 'import_screen.dart';
+import 'move_products_screen.dart';
 import 'product_form_screen.dart';
 import 'requests_screen.dart';
 import 'scanner_screen.dart';
@@ -244,6 +245,15 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                                   case 'delete':
                                     _deleteStore(store, all?.length ?? 0);
                                     break;
+                                  case 'move':
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => MoveProductsScreen(store: store),
+                                        fullscreenDialog: true,
+                                      ),
+                                    );
+                                    break;
                                   case 'history':
                                     Navigator.push(
                                       context,
@@ -258,6 +268,13 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                                 PopupMenuItem(
                                   value: 'history',
                                   child: ListTile(leading: Icon(Icons.history), title: Text('Stock history')),
+                                ),
+                                PopupMenuItem(
+                                  value: 'move',
+                                  child: ListTile(
+                                    leading: Icon(Icons.drive_file_move_outline),
+                                    title: Text('Move products…'),
+                                  ),
                                 ),
                                 PopupMenuItem(
                                   value: 'import',

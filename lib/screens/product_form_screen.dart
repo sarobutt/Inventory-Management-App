@@ -5,6 +5,7 @@ import '../barcode.dart';
 import '../data.dart';
 import '../widgets.dart';
 import 'audit_screen.dart';
+import 'move_products_screen.dart';
 import 'scanner_screen.dart';
 
 /// Create a product in a store (product == null) or edit/delete an existing one.
@@ -233,6 +234,18 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     }
   }
 
+  Future<void> _moveProduct() async {
+    try {
+      final result = await runMoveFlow(context, [widget.product!], fromStoreId: widget.storeId);
+      if (result == null || !mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      Navigator.pop(context);
+      messenger.showSnackBar(SnackBar(content: Text('Done: ${result.summary}')));
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
+
   Future<void> _delete() async {
     final ok = await confirmDelete(
       context,
@@ -269,6 +282,12 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       appBar: AppBar(
         title: Text(_isEdit ? 'Edit product' : 'New product'),
         actions: [
+          if (_isEdit)
+            IconButton(
+              tooltip: 'Move to another store',
+              icon: const Icon(Icons.drive_file_move_outline),
+              onPressed: _saving ? null : _moveProduct,
+            ),
           if (_isEdit)
             IconButton(
               tooltip: 'Stock history',

@@ -63,6 +63,14 @@ Cost and wholesale prices are stored in a separate, admin-only part of the datab
 - Each request shows who asked and when, the staff note, who approved or rejected it and when, how long it took, the reason, and stock before → after.
 - **Print or share as PDF.**
 
+**Moving products (admin):** if products were added to the wrong store or company, you can move them.
+- **One product:** open it and tap the **move icon** (folder with arrow).
+- **Several products:** go to the store's **⋮ → Move products…**, tick the products (or **Select all**), and tap **Move**.
+- Choose the destination store, grouped by company. The company changes automatically with the store.
+- Stock, all three prices, the reorder level and any pending staff requests move with the product.
+- If the destination already has a product with the **same barcode**, choose **Merge stock** (its stock is added to the existing product and the copy is removed) or **Skip**.
+- Every move is recorded in the **Stock audit** as stock leaving one store and arriving in the other.
+
 **No duplicate products:** each barcode/SKU can only be used once per store. Scanning or typing a barcode that already exists in that store shows **"Product already exists"**, with an option to open the existing product, and saving a duplicate is blocked. The same product can still exist in different stores, each with its own stock. Excel imports update the existing product instead of creating a copy.
 
 **Low stock and reordering:** each product has a **Reorder level** (default 5 if left empty).

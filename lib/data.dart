@@ -158,6 +158,20 @@ class Product {
   }
 }
 
+/// Outcome of [Db.moveProducts].
+class MoveResult {
+  final int moved;
+  final int merged;
+  final int skipped;
+  const MoveResult({required this.moved, required this.merged, required this.skipped});
+
+  String get summary => [
+        if (moved > 0) '$moved moved',
+        if (merged > 0) '$merged merged into existing products',
+        if (skipped > 0) '$skipped skipped',
+      ].join(', ');
+}
+
 /// Combines the latest values of two streams (like rxdart's combineLatest2).
 Stream<R> combineLatest2<A, B, R>(Stream<A> a, Stream<B> b, R Function(A a, B b) combine) {
   late final StreamController<R> controller;
@@ -539,6 +553,109 @@ class Db {
       ),
     );
     return batch.commit();
+  }
+
+  /// Moves products to [target] (and its company). Prices, reorder level and pending
+  /// staff requests move too, and the stock movement is recorded in the audit.
+  ///
+  /// If the target store already has a product with the same SKU:
+  ///  - [mergeDuplicates] true  → the stock is added to that product and this one is removed;
+  ///  - [mergeDuplicates] false → the product is skipped.
+  static Future<MoveResult> moveProducts(List<Product> products, Store target, {required bool mergeDuplicates}) async {
+    var moved = 0, merged = 0, skipped = 0;
+    final to = await Audit.names(target.id, target.companyId);
+
+    for (final p in products) {
+      if (p.storeId == target.id) {
+        skipped++;
+        continue;
+      }
+      final from = await Audit.names(p.storeId, p.companyId);
+      final note = 'Moved from ${from.storeName} (${from.companyName}) to ${to.storeName} (${to.companyName})';
+      final duplicate = await findInStoreBySku(target.id, p.sku);
+      final pendingReqs = await _fs
+          .collection('stockRequests')
+          .where('productId', isEqualTo: p.id)
+          .where('status', isEqualTo: 'pending')
+          .get();
+
+      if (duplicate != null && !mergeDuplicates) {
+        skipped++;
+        continue;
+      }
+
+      await _fs.runTransaction((tx) async {
+        final srcRef = _products.doc(p.id);
+        final srcSnap = await tx.get(srcRef);
+        if (!srcSnap.exists) return;
+        final qty = (srcSnap.data()?['quantity'] as num?)?.toInt() ?? 0;
+
+        if (duplicate != null) {
+          // ---- merge into the existing product in the target store ----
+          final dstRef = _products.doc(duplicate.id);
+          final dstSnap = await tx.get(dstRef);
+          if (!dstSnap.exists) return;
+          final dstBefore = (dstSnap.data()?['quantity'] as num?)?.toInt() ?? 0;
+          tx.update(dstRef, {'quantity': dstBefore + qty, 'updatedAt': FieldValue.serverTimestamp()});
+          tx.delete(_prices.doc(p.id));
+          tx.delete(srcRef);
+          for (final r in pendingReqs.docs) {
+            tx.update(r.reference, {
+              'productId': duplicate.id,
+              'productName': duplicate.name,
+              'storeId': target.id,
+              'storeName': to.storeName,
+              'companyId': target.companyId,
+            });
+          }
+          if (qty != 0) {
+            tx.set(Audit.col.doc(), Audit.entry(
+              type: AuditType.move, productId: p.id, productName: p.name, sku: p.sku,
+              storeId: p.storeId, companyId: p.companyId, place: from,
+              before: qty, after: 0, note: '$note (merged into existing product)',
+            ));
+            tx.set(Audit.col.doc(), Audit.entry(
+              type: AuditType.move, productId: duplicate.id, productName: duplicate.name, sku: duplicate.sku,
+              storeId: target.id, companyId: target.companyId, place: to,
+              before: dstBefore, after: dstBefore + qty, note: '$note (merged)',
+            ));
+          }
+        } else {
+          // ---- plain move ----
+          tx.update(srcRef, {
+            'storeId': target.id,
+            'companyId': target.companyId,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+          tx.set(_prices.doc(p.id), {'storeId': target.id, 'companyId': target.companyId}, SetOptions(merge: true));
+          for (final r in pendingReqs.docs) {
+            tx.update(r.reference, {
+              'storeId': target.id,
+              'storeName': to.storeName,
+              'companyId': target.companyId,
+            });
+          }
+          if (qty != 0) {
+            tx.set(Audit.col.doc(), Audit.entry(
+              type: AuditType.move, productId: p.id, productName: p.name, sku: p.sku,
+              storeId: p.storeId, companyId: p.companyId, place: from,
+              before: qty, after: 0, note: note,
+            ));
+            tx.set(Audit.col.doc(), Audit.entry(
+              type: AuditType.move, productId: p.id, productName: p.name, sku: p.sku,
+              storeId: target.id, companyId: target.companyId, place: to,
+              before: 0, after: qty, note: note,
+            ));
+          }
+        }
+      });
+      if (duplicate != null) {
+        merged++;
+      } else {
+        moved++;
+      }
+    }
+    return MoveResult(moved: moved, merged: merged, skipped: skipped);
   }
 
   /// The product in [storeId] with this exact SKU/barcode, if any (used to prevent duplicates).
