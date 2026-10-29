@@ -33,7 +33,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   late final _sku = TextEditingController(text: widget.product?.sku ?? '');
   late final _retail = TextEditingController(text: _fmt(widget.product?.prices.retail));
   late final _wholesale = TextEditingController(text: _fmt(widget.product?.prices.wholesale));
-  late final _perItem = TextEditingController(text: _fmt(widget.product?.prices.perItem));
+  late final _cost = TextEditingController(text: _fmt(widget.product?.prices.cost));
 
   static String _fmt(double? v) => v == null ? '' : v.toStringAsFixed(2);
   late final _quantity = TextEditingController(text: '${widget.product?.quantity ?? 0}');
@@ -111,7 +111,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       if (found != null) {
         if (_retail.text.trim().isEmpty && found.retail != null) _retail.text = _fmt(found.retail);
         if (_wholesale.text.trim().isEmpty && found.wholesale != null) _wholesale.text = _fmt(found.wholesale);
-        if (_perItem.text.trim().isEmpty && found.perItem != null) _perItem.text = _fmt(found.perItem);
+        if (_cost.text.trim().isEmpty && found.cost != null) _cost.text = _fmt(found.cost);
       }
       if (_description.text.trim().isEmpty && info.description != null) _description.text = info.description!;
       _lookupNote = 'Found in ${info.source}: ${info.name}';
@@ -124,7 +124,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     _sku.dispose();
     _retail.dispose();
     _wholesale.dispose();
-    _perItem.dispose();
+    _cost.dispose();
     _quantity.dispose();
     _reorder.dispose();
     _description.dispose();
@@ -190,7 +190,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       final prices = Prices(
         retail: _parsePrice(_retail.text),
         wholesale: _parsePrice(_wholesale.text),
-        perItem: _parsePrice(_perItem.text),
+        cost: _parsePrice(_cost.text),
       );
       final quantity = int.tryParse(_quantity.text.trim()) ?? 0;
       final reorderText = _reorder.text.trim();
@@ -354,23 +354,23 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              'Staff can see the Retail price only. Wholesale and Per item are visible to admins only.',
+              'Staff can see the Retail price only. Cost and Wholesale are visible to admins only.',
               style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 13),
             ),
             const SizedBox(height: 10),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(child: _priceField(_retail, 'Retail')),
+                Expanded(child: _priceField(_cost, 'Cost price')),
                 const SizedBox(width: 12),
-                Expanded(child: _priceField(_wholesale, 'Wholesale')),
+                Expanded(child: _priceField(_wholesale, 'Wholesale price')),
               ],
             ),
             const SizedBox(height: 16),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(child: _priceField(_perItem, 'Per item')),
+                Expanded(child: _priceField(_retail, 'Retail price')),
                 const SizedBox(width: 12),
                 Expanded(
                   child: TextFormField(

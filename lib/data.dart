@@ -10,8 +10,8 @@ import 'auth.dart';
 //   stores/{id}         companyId, name, address
 //   products/{id}       companyId, storeId, name, sku, retailPrice, quantity, reorderLevel, description
 //                       (everyone signed in can READ retailPrice; only admins can change it)
-//   productPrices/{id}  wholesale, perItem, companyId, storeId   (ADMIN ONLY; same id as the
-//                       product, so staff can never read wholesale or per-item prices)
+//   productPrices/{id}  cost, wholesale, companyId, storeId   (ADMIN ONLY; same id as the
+//                       product, so staff can never read cost or wholesale prices)
 
 // ---------------- Models ----------------
 
@@ -52,27 +52,27 @@ class Store {
 }
 
 /// The three selling prices of a product.
-/// Retail: visible to everyone. Wholesale and per item: admins only. Only admins can change prices.
+/// Cost and Wholesale: admins only. Retail: visible to everyone. Only admins can change prices.
 class Prices {
-  final double? retail;
+  final double? cost;
   final double? wholesale;
-  final double? perItem;
+  final double? retail;
 
-  const Prices({this.retail, this.wholesale, this.perItem});
+  const Prices({this.cost, this.wholesale, this.retail});
 
   static const none = Prices();
 
-  bool get isEmpty => retail == null && wholesale == null && perItem == null;
+  bool get isEmpty => retail == null && wholesale == null && cost == null;
 
-  /// Reads the admin-only price record (wholesale + per item).
+  /// Reads the admin-only price record (cost + wholesale).
   factory Prices.fromAdminDoc(Map<String, dynamic>? d) {
     if (d == null) return none;
     double? n(Object? v) => (v as num?)?.toDouble();
-    return Prices(wholesale: n(d['wholesale']), perItem: n(d['perItem']));
+    return Prices(cost: n(d['cost']), wholesale: n(d['wholesale']));
   }
 
-  /// Keeps this retail price and takes wholesale/per item from [admin].
-  Prices withAdmin(Prices admin) => Prices(retail: retail, wholesale: admin.wholesale, perItem: admin.perItem);
+  /// Keeps this retail price and takes cost/wholesale from [admin].
+  Prices withAdmin(Prices admin) => Prices(cost: admin.cost, wholesale: admin.wholesale, retail: retail);
 
   Prices get retailOnly => Prices(retail: retail);
 
@@ -80,7 +80,7 @@ class Prices {
   Prices mergedWith(Prices other) => Prices(
         retail: other.retail ?? retail,
         wholesale: other.wholesale ?? wholesale,
-        perItem: other.perItem ?? perItem,
+        cost: other.cost ?? cost,
       );
 }
 
@@ -94,7 +94,7 @@ class Product {
   final String name;
   final String sku;
 
-  /// Retail for everyone; wholesale and per item are filled in for admins only.
+  /// Retail for everyone; cost and wholesale are filled in for admins only.
   final Prices prices;
   final int quantity;
 
@@ -372,13 +372,13 @@ class Db {
     );
   }
 
-  /// Admin: the wholesale and per-item prices of one product.
+  /// Admin: the cost and wholesale prices of one product.
   static Future<Prices> getAdminPrices(String productId) async =>
       Prices.fromAdminDoc((await _prices.doc(productId).get()).data());
 
   static Map<String, dynamic> _priceDoc(Prices prices, String companyId, String storeId) => {
         'wholesale': prices.wholesale,
-        'perItem': prices.perItem,
+        'cost': prices.cost,
         'companyId': companyId,
         'storeId': storeId,
         'updatedAt': FieldValue.serverTimestamp(),

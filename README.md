@@ -32,11 +32,11 @@ App
 
 Columns (the first row must contain the headings, in any order):
 
-| Product | SKU | Retail Price | Wholesale Price | Per Item Price | Quantity | Reorder Level | Description |
+| Product | SKU | Cost Price | Wholesale Price | Retail Price | Quantity | Reorder Level | Description |
 |---|---|---|---|---|---|---|---|
-| Nivea Soft Cream 200ml | 4005808890507 | 21.00 | 12.75 | 23.00 | 36 | 8 | |
+| Nivea Soft Cream 200ml | 4005808890507 | 9.50 | 12.75 | 21.00 | 36 | 8 | |
 
-Only **Product** is required. Common alternative headings also work (Name, Item, Code, Barcode, Price/RRP for retail, Trade/Cost for wholesale, Unit Price/Each for per item, Qty, Stock). Empty price cells keep the product's current price. Ready-made templates are in [`templates/`](templates/). Old `.xls` files must be re-saved as `.xlsx`.
+Only **Product** is required. Common alternative headings also work (Name, Item, Code, Barcode, Cost/Unit Cost/Purchase Price for cost, Trade for wholesale, Price/RRP for retail, Qty, Stock). Empty price cells keep the product's current price. Ready-made templates are in [`templates/`](templates/). Old `.xls` files must be re-saved as `.xlsx`.
 
 **Currency:** all prices are in **Qatari riyal (QAR)**, e.g. *QAR 32.00*. Price boxes and Excel files also accept "QAR", "ر.ق" or plain numbers.
 
@@ -44,11 +44,11 @@ Only **Product** is required. Common alternative headings also work (Name, Item,
 
 | Price | Admin | Staff |
 |---|---|---|
-| **Retail** | View and change | **View only** (on product cards and in tables/PDFs) |
-| **Wholesale** | View and change | Hidden |
-| **Per item** | View and change | Hidden |
+| **Cost price** | View and change | Hidden |
+| **Wholesale price** | View and change | Hidden |
+| **Retail price** | View and change | **View only** (on product cards and in tables/PDFs) |
 
-Wholesale and per-item prices are stored in a separate, admin-only part of the database (`productPrices`), so staff can't read them even with technical tools. Stock value is calculated at retail price. If you used the app before this change, each product's old single price becomes its **Retail** price automatically the first time an admin opens the app.
+Cost and wholesale prices are stored in a separate, admin-only part of the database (`productPrices`), so staff can't read them even with technical tools. Stock value is calculated at retail price. If you used the app before this change, each product's old single price becomes its **Retail** price automatically the first time an admin opens the app.
 
 **Stock audit (admin):** every stock change is recorded automatically, including + / − taps, typed counts, approved staff requests, new products, quantity edits, Excel imports and deleted products. Each entry records **when, who did it (and who approved it), product, store, company, the change (+/−) and stock before → after**. Open it from the **🕘 history icon** on the home screen, **Profile → Stock audit**, a store's **⋮ → Stock history**, or a product's **🕘** icon.
 - **Filters:** date (Today, 7 days, 30 days, This month, or custom dates), **user**, **company**, **store**, **product**, and **Added / Removed**.

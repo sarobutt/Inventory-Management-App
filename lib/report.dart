@@ -127,9 +127,9 @@ TableData productsTable(
       p.sku,
       companyName[p.companyId] ?? '',
       storeName[p.storeId] ?? '',
-      formatPrice(p.prices.retail),
+      formatPrice(p.prices.cost),
       formatPrice(p.prices.wholesale),
-      formatPrice(p.prices.perItem),
+      formatPrice(p.prices.retail),
       count(p.quantity),
       money(p.value),
       p.stockStatus,
@@ -139,15 +139,15 @@ TableData productsTable(
   final t = TableData(
     title: needsOrderingOnly ? 'Products to order' : 'Products',
     headers: const [
-      'Product', 'SKU', 'Company', 'Store', 'Retail', 'Wholesale', 'Per item', 'Qty', 'Value (retail)', 'Stock status',
+      'Product', 'SKU', 'Company', 'Store', 'Cost', 'Wholesale', 'Retail', 'Qty', 'Value (retail)', 'Stock status',
     ],
     rows: rows,
     numericColumns: const {4, 5, 6, 7, 8},
     totals: ['TOTAL', '', '', '', '', '', '', count(tUnits), money(tValue), ''],
     rowHighlights: highlights,
   );
-  // Staff keep Retail; wholesale, per item and value are hidden.
-  return showPrices ? t : _withoutColumns(t, {5, 6, 8});
+  // Staff keep Retail; cost, wholesale and value are hidden.
+  return showPrices ? t : _withoutColumns(t, {4, 5, 8});
 }
 
 // ---------------- PDF / printing ----------------

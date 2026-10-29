@@ -10,7 +10,7 @@ import 'data.dart';
 class BarcodeInfo {
   final String code;
   final String? name;
-  final Prices? prices; // only known from your own products (wholesale/per item for admins only)
+  final Prices? prices; // only known from your own products (cost/wholesale for admins only)
   final String? description;
   final String source; // shown to the user, e.g. "Open Beauty Facts"
 

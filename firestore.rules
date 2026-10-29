@@ -5,7 +5,7 @@ rules_version = '2';
 //   Admin : full access (companies, stores, products, all prices, approvals, users)
 //   Staff : read companies, stores, products and the RETAIL price; create stock-change
 //           REQUESTS; cancel their own pending requests; edit their own name/phone.
-//           Staff can never read wholesale or per-item prices (productPrices).
+//           Staff can never read cost or wholesale prices (productPrices).
 //   Not signed in : can only look up a username to sign in, and check
 //           whether the first admin has been set up.
 
@@ -115,7 +115,7 @@ service cloud.firestore {
                                     && request.resource.data.reorderLevel >= 0));
     }
 
-    // Wholesale and per-item prices: admins only, for reading AND writing.
+    // Cost and wholesale prices: admins only, for reading AND writing.
     match /productPrices/{id} {
       allow read, write: if isAdmin();
     }

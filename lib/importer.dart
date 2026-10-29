@@ -13,7 +13,7 @@ import 'widgets.dart';
 //  Import products into ONE store from Excel (.xlsx) or CSV.
 //
 //  Expected columns (header row, any order, case-insensitive):
-//    Product | SKU | Retail Price | Wholesale Price | Per Item Price | Quantity | Reorder Level | Description
+//    Product | SKU | Cost Price | Wholesale Price | Retail Price | Quantity | Reorder Level | Description
 //  Only "Product" is required. Companies and stores are never created here.
 // =====================================================================
 
@@ -211,17 +211,14 @@ List<List<String>> _readXlsx(Uint8List bytes) {
 //  Turning the grid into rows
 // ---------------------------------------------------------------------
 
-enum _Col { product, sku, retail, wholesale, perItem, quantity, reorder, description }
+enum _Col { product, sku, cost, wholesale, retail, quantity, reorder, description }
 
 const Map<_Col, List<String>> _aliases = {
   _Col.product: ['product', 'productname', 'name', 'item', 'itemname'],
   _Col.sku: ['sku', 'code', 'productcode', 'itemcode', 'barcode', 'ref', 'reference'],
   _Col.retail: ['retailprice', 'retail', 'price', 'rrp', 'sellingprice', 'saleprice'],
-  _Col.wholesale: ['wholesaleprice', 'wholesale', 'trade', 'tradeprice', 'cost', 'costprice'],
-  _Col.perItem: [
-    'peritemprice', 'peritem', 'peritemsale', 'peritemsaleprice', 'itemprice', 'priceperitem',
-    'unitprice', 'priceeach', 'each', 'singleprice', 'singleitemprice',
-  ],
+  _Col.wholesale: ['wholesaleprice', 'wholesale', 'trade', 'tradeprice'],
+  _Col.cost: ['costprice', 'cost', 'unitcost', 'purchaseprice', 'buyprice', 'buyingprice', 'costperunit'],
   _Col.quantity: ['quantity', 'qty', 'stock', 'count', 'units', 'stockcount', 'onhand', 'qtyinstock'],
   _Col.reorder: [
     'reorderlevel', 'reorder', 'reorderat', 'reorderpoint', 'minstock', 'minimumstock', 'minimum', 'min',
@@ -261,7 +258,7 @@ List<ImportRow> rowsFromGrid(List<List<String>> grid) {
   if (!colOf.containsKey(_Col.product)) {
     throw ImportException(
       'Could not find a "Product" column in the first row.\n'
-      'Expected headings: Product, SKU, Retail Price, Wholesale Price, Per Item Price, Quantity, Reorder Level, Description.',
+      'Expected headings: Product, SKU, Cost Price, Wholesale Price, Retail Price, Quantity, Reorder Level, Description.',
     );
   }
 
@@ -295,7 +292,7 @@ List<ImportRow> rowsFromGrid(List<List<String>> grid) {
     final prices = Prices(
       retail: readPrice(_Col.retail, 'retail'),
       wholesale: readPrice(_Col.wholesale, 'wholesale'),
-      perItem: readPrice(_Col.perItem, 'per item'),
+      cost: readPrice(_Col.cost, 'cost'),
     );
 
     String? error;
@@ -465,7 +462,7 @@ ImportPlan buildPlan({
 // ---------------------------------------------------------------------
 
 /// Saves the planned products. Each product is up to three writes (the product with its
-/// retail price, the admin-only wholesale/per-item prices, and an audit entry), so 150 per batch.
+/// retail price, the admin-only cost/wholesale prices, and an audit entry), so 150 per batch.
 Future<void> runImport(ImportPlan plan, {void Function(double progress)? onProgress, String fileName = ''}) async {
   final fs = FirebaseFirestore.instance;
   final writes = plan._writes.values.toList();
@@ -515,7 +512,7 @@ Future<void> runImport(ImportPlan plan, {void Function(double progress)? onProgr
       }
       batch.set(fs.collection('productPrices').doc(ref.id), {
         'wholesale': p.prices.wholesale,
-        'perItem': p.prices.perItem,
+        'cost': p.prices.cost,
         'companyId': plan.companyId,
         'storeId': plan.storeId,
         'updatedAt': FieldValue.serverTimestamp(),
