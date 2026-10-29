@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'audit.dart';
 import 'auth.dart';
 
 // Data structure
@@ -255,10 +256,40 @@ class Db {
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
+  /// Records a 'delete' audit entry for each product that still had stock.
+  static Future<void> _auditDeletedProducts(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs, String note) async {
+    final entries = <Map<String, dynamic>>[];
+    for (final d in docs) {
+      final p = Product.fromDoc(d);
+      if (p.quantity == 0) continue;
+      final place = await Audit.names(p.storeId, p.companyId);
+      entries.add(Audit.entry(
+        type: AuditType.delete,
+        productId: p.id,
+        productName: p.name,
+        sku: p.sku,
+        storeId: p.storeId,
+        companyId: p.companyId,
+        place: place,
+        before: p.quantity,
+        after: 0,
+        note: note,
+      ));
+    }
+    for (var i = 0; i < entries.length; i += 450) {
+      final batch = _fs.batch();
+      for (final e in entries.skip(i).take(450)) {
+        batch.set(Audit.col.doc(), e);
+      }
+      await batch.commit();
+    }
+  }
+
   /// Deletes the company together with all of its stores, products and prices.
   static Future<void> deleteCompany(String id) async {
     final products = await _products.where('companyId', isEqualTo: id).get();
     final stores = await _stores.where('companyId', isEqualTo: id).get();
+    await _auditDeletedProducts(products.docs, 'Company deleted');
     await _deleteAll([
       ...products.docs.map((d) => _prices.doc(d.id)),
       ...products.docs.map((d) => d.reference),
@@ -302,6 +333,7 @@ class Db {
   /// Deletes the store together with all of its products and their prices.
   static Future<void> deleteStore(String id) async {
     final products = await _products.where('storeId', isEqualTo: id).get();
+    await _auditDeletedProducts(products.docs, 'Store deleted');
     await _deleteAll([
       ...products.docs.map((d) => _prices.doc(d.id)),
       ...products.docs.map((d) => d.reference),
@@ -361,8 +393,9 @@ class Db {
     required int quantity,
     required int? reorderLevel,
     required String description,
-  }) {
+  }) async {
     final ref = _products.doc();
+    final place = await Audit.names(storeId, companyId);
     final batch = _fs.batch();
     batch.set(ref, {
       'companyId': companyId,
@@ -377,6 +410,20 @@ class Db {
       'updatedAt': FieldValue.serverTimestamp(),
     });
     batch.set(_prices.doc(ref.id), _priceDoc(prices, companyId, storeId));
+    batch.set(
+      Audit.col.doc(),
+      Audit.entry(
+        type: AuditType.create,
+        productId: ref.id,
+        productName: name,
+        sku: sku,
+        storeId: storeId,
+        companyId: companyId,
+        place: place,
+        before: 0,
+        after: quantity,
+      ),
+    );
     return batch.commit();
   }
 
@@ -388,9 +435,11 @@ class Db {
     required String sku,
     required Prices prices,
     required int quantity,
+    required int previousQuantity,
     required int? reorderLevel,
     required String description,
-  }) {
+  }) async {
+    final place = quantity != previousQuantity ? await Audit.names(storeId, companyId) : null;
     final batch = _fs.batch();
     batch.update(_products.doc(id), {
       'name': name,
@@ -403,6 +452,23 @@ class Db {
       'updatedAt': FieldValue.serverTimestamp(),
     });
     batch.set(_prices.doc(id), _priceDoc(prices, companyId, storeId));
+    if (place != null) {
+      batch.set(
+        Audit.col.doc(),
+        Audit.entry(
+          type: AuditType.edit,
+          productId: id,
+          productName: name,
+          sku: sku,
+          storeId: storeId,
+          companyId: companyId,
+          place: place,
+          before: previousQuantity,
+          after: quantity,
+          note: 'Quantity changed in the product form',
+        ),
+      );
+    }
     return batch.commit();
   }
 
@@ -426,21 +492,52 @@ class Db {
   }
 
   /// Stock counting: add or subtract units. Never goes below zero.
-  static Future<void> adjustQuantity(String productId, int delta) {
-    final ref = _products.doc(productId);
-    return _fs.runTransaction((tx) async {
+  static Future<void> adjustQuantity(Product product, int delta) async {
+    final ref = _products.doc(product.id);
+    final place = await Audit.names(product.storeId, product.companyId);
+    await _fs.runTransaction((tx) async {
       final snap = await tx.get(ref);
       if (!snap.exists) return;
       final current = (snap.data()?['quantity'] as num?)?.toInt() ?? 0;
       final next = current + delta < 0 ? 0 : current + delta;
+      if (next == current) return;
       tx.update(ref, {'quantity': next, 'updatedAt': FieldValue.serverTimestamp()});
+      tx.set(
+        Audit.col.doc(),
+        Audit.entry(
+          type: AuditType.adjust,
+          productId: product.id,
+          productName: (snap.data()?['name'] as String?) ?? product.name,
+          sku: (snap.data()?['sku'] as String?) ?? product.sku,
+          storeId: product.storeId,
+          companyId: product.companyId,
+          place: place,
+          before: current,
+          after: next,
+        ),
+      );
     });
   }
 
-  static Future<void> deleteProduct(String id) {
+  static Future<void> deleteProduct(Product product) async {
+    final place = await Audit.names(product.storeId, product.companyId);
     final batch = _fs.batch();
-    batch.delete(_prices.doc(id));
-    batch.delete(_products.doc(id));
+    batch.delete(_prices.doc(product.id));
+    batch.delete(_products.doc(product.id));
+    batch.set(
+      Audit.col.doc(),
+      Audit.entry(
+        type: AuditType.delete,
+        productId: product.id,
+        productName: product.name,
+        sku: product.sku,
+        storeId: product.storeId,
+        companyId: product.companyId,
+        place: place,
+        before: product.quantity,
+        after: 0,
+      ),
+    );
     return batch.commit();
   }
 

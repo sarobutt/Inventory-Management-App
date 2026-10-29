@@ -120,7 +120,18 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
-    // ---------- stock change requests ----------
+    // ---------- stock audit trail ----------
+    // Admin-only. Entries can be added but never changed or deleted, so the history can be trusted.
+    match /auditLog/{id} {
+      allow read: if isAdmin();
+      allow create: if isAdmin()
+                    && request.resource.data.productId is string
+                    && request.resource.data.delta is int
+                    && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+        // ---------- stock change requests ----------
     match /stockRequests/{id} {
       allow read: if isActive();
 

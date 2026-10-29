@@ -4,6 +4,7 @@ import '../auth.dart';
 import '../data.dart';
 import '../requests.dart';
 import '../widgets.dart';
+import 'audit_screen.dart';
 import 'import_screen.dart';
 import 'product_form_screen.dart';
 import 'requests_screen.dart';
@@ -64,7 +65,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
 
   Future<void> _adjust(Product p, int delta) async {
     try {
-      await Db.adjustQuantity(p.id, delta);
+      await Db.adjustQuantity(p, delta);
     } catch (e) {
       if (mounted) showError(context, e);
     }
@@ -80,7 +81,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
     final ok = await confirmDelete(context, title: 'Remove product?', message: '“${p.name}” will be removed.');
     if (!ok) return;
     try {
-      await Db.deleteProduct(p.id);
+      await Db.deleteProduct(p);
       if (mounted) showMessage(context, 'Product removed');
     } catch (e) {
       if (mounted) showError(context, e);
@@ -243,9 +244,21 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                                   case 'delete':
                                     _deleteStore(store, all?.length ?? 0);
                                     break;
+                                  case 'history':
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => AuditScreen(companyId: store.companyId, storeId: store.id),
+                                      ),
+                                    );
+                                    break;
                                 }
                               },
                               itemBuilder: (_) => const [
+                                PopupMenuItem(
+                                  value: 'history',
+                                  child: ListTile(leading: Icon(Icons.history), title: Text('Stock history')),
+                                ),
                                 PopupMenuItem(
                                   value: 'import',
                                   child: ListTile(leading: Icon(Icons.upload_file), title: Text('Import from Excel')),

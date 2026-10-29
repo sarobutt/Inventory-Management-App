@@ -5,6 +5,7 @@ import 'package:archive/archive.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:xml/xml.dart';
 
+import 'audit.dart';
 import 'data.dart';
 
 // =====================================================================
@@ -355,11 +356,13 @@ class _ProductWrite {
   String sku;
   Prices prices;
   int quantity;
+  final int previousQuantity; // 0 for new products
   int? reorderLevel;
   String description;
 
   _ProductWrite({
     required this.existingId,
+    this.previousQuantity = 0,
     required this.name,
     required this.sku,
     required this.prices,
@@ -434,6 +437,7 @@ ImportPlan buildPlan({
           mode == QuantityMode.add ? existing.quantity + (row.quantity ?? 0) : (row.quantity ?? existing.quantity);
       writes[writeKey] = _ProductWrite(
         existingId: existing.id,
+        previousQuantity: existing.quantity,
         name: row.product,
         sku: row.sku.isNotEmpty ? row.sku : existing.sku,
         prices: existing.prices.mergedWith(row.prices), // empty cells keep the current price
@@ -463,15 +467,16 @@ ImportPlan buildPlan({
 //  Writing to Firestore
 // ---------------------------------------------------------------------
 
-/// Saves the planned products. Each product is two writes (the product with its
-/// retail price, and the admin-only wholesale/per-item prices), so 200 per batch.
-Future<void> runImport(ImportPlan plan, {void Function(double progress)? onProgress}) async {
+/// Saves the planned products. Each product is up to three writes (the product with its
+/// retail price, the admin-only wholesale/per-item prices, and an audit entry), so 150 per batch.
+Future<void> runImport(ImportPlan plan, {void Function(double progress)? onProgress, String fileName = ''}) async {
   final fs = FirebaseFirestore.instance;
   final writes = plan._writes.values.toList();
+  final place = await Audit.names(plan.storeId, plan.companyId);
 
-  for (var i = 0; i < writes.length; i += 200) {
+  for (var i = 0; i < writes.length; i += 150) {
     final batch = fs.batch();
-    final chunk = writes.skip(i).take(200);
+    final chunk = writes.skip(i).take(150);
     for (final p in chunk) {
       final data = <String, dynamic>{
         'companyId': plan.companyId,
@@ -494,6 +499,23 @@ Future<void> runImport(ImportPlan plan, {void Function(double progress)? onProgr
         data['createdAt'] = FieldValue.serverTimestamp();
         batch.set(ref, data);
       }
+      if (p.quantity != p.previousQuantity) {
+        batch.set(
+          Audit.col.doc(),
+          Audit.entry(
+            type: AuditType.import,
+            productId: ref.id,
+            productName: p.name,
+            sku: p.sku,
+            storeId: plan.storeId,
+            companyId: plan.companyId,
+            place: place,
+            before: p.previousQuantity,
+            after: p.quantity,
+            note: fileName.isEmpty ? 'Excel import' : 'Imported from $fileName',
+          ),
+        );
+      }
       batch.set(fs.collection('productPrices').doc(ref.id), {
         'wholesale': p.prices.wholesale,
         'perItem': p.prices.perItem,
@@ -503,6 +525,6 @@ Future<void> runImport(ImportPlan plan, {void Function(double progress)? onProgr
       });
     }
     await batch.commit();
-    if (onProgress != null) onProgress((i + 200).clamp(0, writes.length) / writes.length);
+    if (onProgress != null) onProgress((i + 150).clamp(0, writes.length) / writes.length);
   }
 }

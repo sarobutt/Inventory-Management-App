@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'audit.dart';
 import 'auth.dart';
 import 'data.dart';
 
@@ -166,11 +167,13 @@ class StockRequests {
 
   /// Admin: apply the change to the product's stock and mark the request approved.
   /// Stock never goes below zero.
-  static Future<void> approve(StockRequest r) {
+  static Future<void> approve(StockRequest r) async {
     final me = currentUser.value!;
     final reqRef = _col.doc(r.id);
     final productRef = _fs.collection('products').doc(r.productId);
-    return _fs.runTransaction((tx) async {
+    final place = await Audit.names(r.storeId, r.companyId);
+    final meName = me.displayName.isEmpty ? me.username : me.displayName;
+    await _fs.runTransaction((tx) async {
       final reqSnap = await tx.get(reqRef);
       if (reqSnap.data()?['status'] != 'pending') {
         throw StateError('This request has already been handled.');
@@ -182,10 +185,29 @@ class StockRequests {
       final before = (productSnap.data()?['quantity'] as num?)?.toInt() ?? 0;
       final after = before + r.delta < 0 ? 0 : before + r.delta;
       tx.update(productRef, {'quantity': after, 'updatedAt': FieldValue.serverTimestamp()});
+      tx.set(
+        Audit.col.doc(),
+        Audit.entry(
+          type: AuditType.request,
+          productId: r.productId,
+          productName: (productSnap.data()?['name'] as String?) ?? r.productName,
+          sku: (productSnap.data()?['sku'] as String?) ?? '',
+          storeId: r.storeId,
+          companyId: r.companyId,
+          place: place,
+          before: before,
+          after: after,
+          note: r.note,
+          userId: r.requestedBy,
+          userName: r.requestedByName,
+          approvedById: me.uid,
+          approvedByName: meName,
+        ),
+      );
       tx.update(reqRef, {
         'status': 'approved',
         'decidedBy': me.uid,
-        'decidedByName': me.displayName.isEmpty ? me.username : me.displayName,
+        'decidedByName': meName,
         'decidedAt': FieldValue.serverTimestamp(),
         'quantityBefore': before,
         'quantityAfter': after,

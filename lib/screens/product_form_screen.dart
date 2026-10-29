@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../barcode.dart';
 import '../data.dart';
 import '../widgets.dart';
+import 'audit_screen.dart';
 import 'scanner_screen.dart';
 
 /// Create a product in a store (product == null) or edit/delete an existing one.
@@ -208,6 +209,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           sku: sku,
           prices: prices,
           quantity: quantity,
+          previousQuantity: widget.product!.quantity,
           reorderLevel: reorderLevel,
           description: description,
         );
@@ -243,7 +245,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     );
     if (!ok) return;
     try {
-      await Db.deleteProduct(widget.product!.id);
+      await Db.deleteProduct(widget.product!);
       if (mounted) {
         Navigator.pop(context);
         showMessage(context, 'Product deleted');
@@ -271,6 +273,22 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       appBar: AppBar(
         title: Text(_isEdit ? 'Edit product' : 'New product'),
         actions: [
+          if (_isEdit)
+            IconButton(
+              tooltip: 'Stock history',
+              icon: const Icon(Icons.history),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => AuditScreen(
+                    companyId: widget.companyId,
+                    storeId: widget.storeId,
+                    productId: widget.product!.id,
+                    productName: widget.product!.name,
+                  ),
+                ),
+              ),
+            ),
           if (_isEdit)
             IconButton(tooltip: 'Delete product', icon: const Icon(Icons.delete_outline), onPressed: _delete),
         ],

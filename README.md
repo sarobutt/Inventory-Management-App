@@ -48,6 +48,13 @@ Only **Product** is required. Common alternative headings also work (Name, Item,
 
 Wholesale and per-item prices are stored in a separate, admin-only part of the database (`productPrices`), so staff can't read them even with technical tools. Stock value is calculated at retail price. If you used the app before this change, each product's old single price becomes its **Retail** price automatically the first time an admin opens the app.
 
+**Stock audit (admin):** every stock change is recorded automatically, including + / − taps, typed counts, approved staff requests, new products, quantity edits, Excel imports and deleted products. Each entry records **when, who did it (and who approved it), product, store, company, the change (+/−) and stock before → after**. Open it from the **🕘 history icon** on the home screen, **Profile → Stock audit**, a store's **⋮ → Stock history**, or a product's **🕘** icon.
+- **Filters:** date (Today, 7 days, 30 days, This month, or custom dates), **user**, **company**, **store**, **product**, and **Added / Removed**.
+- **Totals** for the filtered view: number of movements, units added, units removed and net change.
+- **Print or share as PDF** with the filters shown in the header.
+- Audit entries **can't be edited or deleted** by anyone, so the history can be trusted. Only admins can view it.
+- Recording starts from the version that added the audit. Earlier approved staff requests are still in **Stock requests → History**.
+
 **No duplicate products:** each barcode/SKU can only be used once per store. Scanning or typing a barcode that already exists in that store shows **"Product already exists"**, with an option to open the existing product, and saving a duplicate is blocked. The same product can still exist in different stores, each with its own stock. Excel imports update the existing product instead of creating a copy.
 
 **Low stock and reordering:** each product has a **Reorder level** (default 5 if left empty).
@@ -229,6 +236,8 @@ lib/report.dart                            table building + PDF print/share
 lib/importer.dart                          Excel/CSV reading, matching, bulk writes
 lib/brand.dart                             Beauty Souq name, colours and logo
 lib/auth.dart                              sign-in, profiles, roles, user management
+lib/audit.dart                             stock audit trail (records every stock change)
+lib/screens/audit_screen.dart              audit screen: filters, totals, print/PDF
 lib/requests.dart                          staff stock requests + admin approval
 lib/barcode.dart                           barcode lookup (own DB → Open Beauty Facts → UPCitemdb)
 lib/screens/scanner_screen.dart            camera barcode scanner

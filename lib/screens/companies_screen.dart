@@ -5,6 +5,7 @@ import '../brand.dart';
 import '../data.dart';
 import '../requests.dart';
 import '../widgets.dart';
+import 'audit_screen.dart';
 import 'company_detail_screen.dart';
 import 'company_form_screen.dart';
 import 'profile_screen.dart';
@@ -51,6 +52,12 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
         ),
         actions: [
           _RequestsButton(isAdmin: isAdmin),
+          if (isAdmin)
+            IconButton(
+              tooltip: 'Stock audit',
+              icon: const Icon(Icons.history),
+              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AuditScreen())),
+            ),
           IconButton(
             tooltip: 'View & print tables',
             icon: const Icon(Icons.table_chart_outlined),

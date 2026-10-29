@@ -81,7 +81,7 @@ class _ImportScreenState extends State<ImportScreen> {
     if (plan == null || !plan.hasWork) return;
     setState(() => _progress = 0);
     try {
-      await runImport(plan, onProgress: (p) {
+      await runImport(plan, fileName: _fileName ?? '', onProgress: (p) {
         if (mounted) setState(() => _progress = p);
       });
       if (!mounted) return;
