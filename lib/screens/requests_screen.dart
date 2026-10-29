@@ -5,6 +5,7 @@ import '../auth.dart';
 import '../data.dart';
 import '../requests.dart';
 import '../widgets.dart';
+import 'audit_screen.dart';
 
 String _when(DateTime? d) {
   if (d == null) return 'just now';
@@ -33,6 +34,14 @@ class RequestsScreen extends StatelessWidget {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Stock requests'),
+          actions: [
+            IconButton(
+              tooltip: 'Approvals audit',
+              icon: const Icon(Icons.fact_check_outlined),
+              onPressed: () =>
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const ApprovalAuditScreen())),
+            ),
+          ],
           bottom: const TabBar(tabs: [Tab(text: 'Pending'), Tab(text: 'History')]),
         ),
         body: TabBarView(

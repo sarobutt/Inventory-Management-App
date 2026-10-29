@@ -57,6 +57,12 @@ Cost and wholesale prices are stored in a separate, admin-only part of the datab
 - Audit entries **can't be edited or deleted** by anyone, so the history can be trusted. Only admins can view it.
 - Recording starts from the version that added the audit. Earlier approved staff requests are still in **Stock requests → History**.
 
+**Approvals audit (admin):** the full history of staff stock requests. Open it from **Profile → Approvals audit**, the ✓ icon on **Stock requests**, or the ✓ icon on **Stock audit**.
+- **Filters:** date (Today, 7 days, 30 days, This month, custom), **status** (Pending, Approved, Rejected, Cancelled, each with counts), **requested by**, **approved/rejected by**, **company**, **store**, **product**.
+- **Summary:** total requests, approved, rejected, pending, **average response time**, and approved units added/removed.
+- Each request shows who asked and when, the staff note, who approved or rejected it and when, how long it took, the reason, and stock before → after.
+- **Print or share as PDF.**
+
 **No duplicate products:** each barcode/SKU can only be used once per store. Scanning or typing a barcode that already exists in that store shows **"Product already exists"**, with an option to open the existing product, and saving a duplicate is blocked. The same product can still exist in different stores, each with its own stock. Excel imports update the existing product instead of creating a copy.
 
 **Low stock and reordering:** each product has a **Reorder level** (default 5 if left empty).

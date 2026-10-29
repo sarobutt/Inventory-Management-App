@@ -47,6 +47,7 @@ class StockRequest {
   final String requestedBy;
   final String requestedByName;
   final DateTime? createdAt;
+  final String decidedBy;
   final String decidedByName;
   final DateTime? decidedAt;
   final String decisionNote;
@@ -66,6 +67,7 @@ class StockRequest {
     required this.requestedBy,
     required this.requestedByName,
     required this.createdAt,
+    required this.decidedBy,
     required this.decidedByName,
     required this.decidedAt,
     required this.decisionNote,
@@ -92,6 +94,7 @@ class StockRequest {
       requestedBy: (d['requestedBy'] as String?) ?? '',
       requestedByName: (d['requestedByName'] as String?) ?? '',
       createdAt: ts(d['createdAt']),
+      decidedBy: (d['decidedBy'] as String?) ?? '',
       decidedByName: (d['decidedByName'] as String?) ?? '',
       decidedAt: ts(d['decidedAt']),
       decisionNote: (d['decisionNote'] as String?) ?? '',
@@ -128,6 +131,16 @@ class StockRequests {
   }
 
   /// Recent requests of any status (admin history).
+  /// All requests created between [from] and [to] (inclusive), newest first (approvals audit).
+  static Stream<List<StockRequest>> watchBetween({required DateTime from, required DateTime to, int limit = 5000}) =>
+      _col
+          .where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(from))
+          .where('createdAt', isLessThanOrEqualTo: Timestamp.fromDate(to))
+          .orderBy('createdAt', descending: true)
+          .limit(limit)
+          .snapshots()
+          .map(_sorted);
+
   static Stream<List<StockRequest>> watchRecent({int limit = 200}) =>
       _col.orderBy('createdAt', descending: true).limit(limit).snapshots().map(_sorted);
 

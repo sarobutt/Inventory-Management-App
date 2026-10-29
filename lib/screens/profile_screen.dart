@@ -88,6 +88,15 @@ class ProfileScreen extends StatelessWidget {
                   ),
                 if (me.isAdmin)
                   ListTile(
+                    leading: const Icon(Icons.fact_check_outlined),
+                    title: const Text('Approvals audit'),
+                    subtitle: const Text('All staff requests: approved, rejected, pending'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () =>
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => const ApprovalAuditScreen())),
+                  ),
+                if (me.isAdmin)
+                  ListTile(
                     leading: const Icon(Icons.group_outlined),
                     title: const Text('Manage users'),
                     trailing: const Icon(Icons.chevron_right),
