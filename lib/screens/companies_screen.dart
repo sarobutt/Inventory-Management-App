@@ -8,6 +8,7 @@ import '../widgets.dart';
 import 'audit_screen.dart';
 import 'company_detail_screen.dart';
 import 'company_form_screen.dart';
+import 'orders_screen.dart';
 import 'profile_screen.dart';
 import 'requests_screen.dart';
 import 'tables_screen.dart';
@@ -122,6 +123,17 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                         child: Text(
                           'Hello, ${me.displayName.isEmpty ? me.username : me.displayName.split(' ').first} (${me.roleLabel})',
                           style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ),
+                    if (isAdmin)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: FilledButton.tonalIcon(
+                          onPressed: () =>
+                              Navigator.push(context, MaterialPageRoute(builder: (_) => const OrdersScreen())),
+                          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                          icon: const Icon(Icons.receipt_long_outlined),
+                          label: const Text('Purchase orders'),
                         ),
                       ),
                     StatsRow([

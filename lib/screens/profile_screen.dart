@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../auth.dart';
 import '../widgets.dart';
 import 'audit_screen.dart';
+import 'orders_screen.dart';
 import 'requests_screen.dart';
 import 'users_screen.dart';
 
@@ -78,6 +79,14 @@ class ProfileScreen extends StatelessWidget {
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RequestsScreen())),
                 ),
+                if (me.isAdmin)
+                  ListTile(
+                    leading: const Icon(Icons.receipt_long_outlined),
+                    title: const Text('Purchase orders'),
+                    subtitle: const Text('Sell products to external customers'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const OrdersScreen())),
+                  ),
                 if (me.isAdmin)
                   ListTile(
                     leading: const Icon(Icons.history),

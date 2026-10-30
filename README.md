@@ -63,6 +63,15 @@ Cost and wholesale prices are stored in a separate, admin-only part of the datab
 - Each request shows who asked and when, the staff note, who approved or rejected it and when, how long it took, the reason, and stock before → after.
 - **Print or share as PDF.**
 
+**Purchase orders (admin):** for external customers buying products from you. Open it from the **Purchase orders** button on the home screen, or from **Profile**.
+1. **+ Order:** enter the customer name, phone, email, their PO/reference and any notes. An order number is created automatically (e.g. PO-261030-4821).
+2. **Add product** (search) or **Scan**: pick the product and the app lists **every store that holds it, with its stock**. Choose the store it comes from, the quantity (you can't order more than that store has) and the unit price, which defaults to Wholesale. The same product can come from two stores as separate lines.
+3. **Amount** is calculated from the lines, and you can type a different invoice amount. Set **Payment: Not paid / Pending / Paid**.
+4. **Upload invoice** (PDF, JPG or PNG, up to 8 MB), then view, share, replace or remove it.
+5. **Save draft** keeps it without touching stock. **Complete order** checks stock and **subtracts it from each chosen store** in one step, and records it in the Stock audit as "Purchase order".
+- Completed orders can still have their customer details, amount, payment status and invoice updated. **⋮ → Cancel & return stock** puts the stock back, which is also recorded in the audit. Drafts and cancelled orders can be deleted.
+- The orders list has a search, status and payment filters, **Total** and **Unpaid** amounts, and print/share. Each order can be shared as a PDF.
+
 **Moving products (admin):** if products were added to the wrong store or company, you can move them.
 - **One product:** open it and tap the **move icon** (folder with arrow).
 - **Several products:** go to the store's **⋮ → Move products…**, tick the products (or **Select all**), and tap **Move**.
@@ -252,6 +261,9 @@ lib/report.dart                            table building + PDF print/share
 lib/importer.dart                          Excel/CSV reading, matching, bulk writes
 lib/brand.dart                             Beauty Souq name, colours and logo
 lib/auth.dart                              sign-in, profiles, roles, user management
+lib/orders.dart                            purchase orders, stock deduction, invoice files
+lib/screens/orders_screen.dart             purchase orders list, filters, totals
+lib/screens/order_form_screen.dart         create/complete order, store picker, invoice
 lib/audit.dart                             stock audit trail (records every stock change)
 lib/screens/audit_screen.dart              audit screen: filters, totals, print/PDF
 lib/requests.dart                          staff stock requests + admin approval

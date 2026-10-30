@@ -120,6 +120,18 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // ---------- purchase orders (external customers) ----------
+    // Admin only. Invoice files are stored in pieces under orderFiles/{orderId}/chunks.
+    match /purchaseOrders/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /orderFiles/{id} {
+      allow read, write: if isAdmin();
+      match /chunks/{chunk} {
+        allow read, write: if isAdmin();
+      }
+    }
+
     // ---------- stock audit trail ----------
     // Admin-only. Entries can be added but never changed or deleted, so the history can be trusted.
     match /auditLog/{id} {

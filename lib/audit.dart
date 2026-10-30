@@ -6,7 +6,7 @@ import 'auth.dart';
 //  Stock audit trail
 //
 //  auditLog/{id}  — one entry per stock change, never edited or deleted.
-//    type            adjust | request | create | edit | import | delete | move
+//    type            adjust | request | create | edit | import | delete | move | order
 //    productId, productName, sku
 //    storeId, storeName, companyId, companyName      (names as they were at the time)
 //    delta           + added / − removed
@@ -17,7 +17,7 @@ import 'auth.dart';
 //    createdAt       server time
 // =====================================================================
 
-enum AuditType { adjust, request, create, edit, import, delete, move }
+enum AuditType { adjust, request, create, edit, import, delete, move, order }
 
 AuditType _typeFrom(String? s) =>
     AuditType.values.firstWhere((t) => t.name == s, orElse: () => AuditType.adjust);
@@ -30,6 +30,7 @@ String auditTypeLabel(AuditType t) => switch (t) {
       AuditType.import => 'Excel import',
       AuditType.delete => 'Product deleted',
       AuditType.move => 'Moved between stores',
+      AuditType.order => 'Purchase order',
     };
 
 class AuditEntry {
