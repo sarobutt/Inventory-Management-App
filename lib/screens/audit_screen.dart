@@ -8,6 +8,7 @@ import '../data.dart';
 import '../report.dart';
 import '../requests.dart';
 import '../widgets.dart';
+import 'stock_overview_screen.dart';
 
 enum _Direction { all, added, removed }
 
@@ -282,6 +283,16 @@ class _AuditScreenState extends State<AuditScreen> {
       appBar: AppBar(
         title: const Text('Stock audit'),
         actions: [
+          IconButton(
+            tooltip: 'Stock overview (what needs ordering)',
+            icon: const Icon(Icons.inventory_outlined),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => StockOverviewScreen(companyId: _companyId, storeId: _storeId),
+              ),
+            ),
+          ),
           IconButton(
             tooltip: 'Approvals audit',
             icon: const Icon(Icons.fact_check_outlined),

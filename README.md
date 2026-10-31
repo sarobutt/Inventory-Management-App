@@ -63,6 +63,10 @@ Cost and wholesale prices are stored in a separate, admin-only part of the datab
 - Each request shows who asked and when, the staff note, who approved or rejected it and when, how long it took, the reason, and stock before → after.
 - **Print or share as PDF.**
 
+**Quick view (everyone):** tap **Quick view** on the home screen and scan a product. You'll see **every store that has it**, with its stock, company, address, retail price and status (needs ordering / out of stock). Tap a store to open it. You can also type a barcode or name.
+
+**Stock overview (admin):** open it from the 📦 icon on **Stock audit**, or from **Profile → Stock overview**. Choose **All stores**, a company or one store. It shows **Needs ordering** by default (out of stock first), or **All products**. With several stores selected, each product lists its stock per store, so you can see whether another store could supply it. **Print or share** to get an order list with "below reorder level by" figures.
+
 **Purchase orders (admin):** for external customers buying products from you. Open it from the **Purchase orders** button on the home screen, or from **Profile**.
 1. **+ Order:** enter the customer name, phone, email, their PO/reference and any notes. An order number is created automatically (e.g. PO-261030-4821).
 2. **Add product** (search) or **Scan**: pick the product and the app lists **every store that holds it, with its stock**. Choose the store it comes from, the quantity (you can't order more than that store has) and the unit price, which defaults to Wholesale. The same product can come from two stores as separate lines.
@@ -261,6 +265,8 @@ lib/report.dart                            table building + PDF print/share
 lib/importer.dart                          Excel/CSV reading, matching, bulk writes
 lib/brand.dart                             Beauty Souq name, colours and logo
 lib/auth.dart                              sign-in, profiles, roles, user management
+lib/screens/quick_view_screen.dart         scan a product, see which stores have it
+lib/screens/stock_overview_screen.dart     stock across stores, what needs ordering
 lib/orders.dart                            purchase orders, stock deduction, invoice files
 lib/screens/orders_screen.dart             purchase orders list, filters, totals
 lib/screens/order_form_screen.dart         create/complete order, store picker, invoice

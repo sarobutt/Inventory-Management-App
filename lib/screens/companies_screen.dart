@@ -9,6 +9,7 @@ import 'audit_screen.dart';
 import 'company_detail_screen.dart';
 import 'company_form_screen.dart';
 import 'orders_screen.dart';
+import 'quick_view_screen.dart';
 import 'profile_screen.dart';
 import 'requests_screen.dart';
 import 'tables_screen.dart';
@@ -125,17 +126,33 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                       ),
-                    if (isAdmin)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: FilledButton.tonalIcon(
-                          onPressed: () =>
-                              Navigator.push(context, MaterialPageRoute(builder: (_) => const OrdersScreen())),
-                          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-                          icon: const Icon(Icons.receipt_long_outlined),
-                          label: const Text('Purchase orders'),
-                        ),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: () => openQuickView(context),
+                              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                              icon: const Icon(Icons.qr_code_scanner),
+                              label: const Text('Quick view'),
+                            ),
+                          ),
+                          if (isAdmin) ...[
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: FilledButton.tonalIcon(
+                                onPressed: () =>
+                                    Navigator.push(context, MaterialPageRoute(builder: (_) => const OrdersScreen())),
+                                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                                icon: const Icon(Icons.receipt_long_outlined),
+                                label: const Text('Orders'),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
+                    ),
                     StatsRow([
                       ('Companies', count(companySnap.data!.length)),
                       ('Stores', count(stores.length)),

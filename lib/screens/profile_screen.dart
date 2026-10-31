@@ -4,6 +4,7 @@ import '../auth.dart';
 import '../widgets.dart';
 import 'audit_screen.dart';
 import 'orders_screen.dart';
+import 'stock_overview_screen.dart';
 import 'requests_screen.dart';
 import 'users_screen.dart';
 
@@ -94,6 +95,15 @@ class ProfileScreen extends StatelessWidget {
                     subtitle: const Text('Every stock change, with filters'),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AuditScreen())),
+                  ),
+                if (me.isAdmin)
+                  ListTile(
+                    leading: const Icon(Icons.inventory_outlined),
+                    title: const Text('Stock overview'),
+                    subtitle: const Text('Stock in every store, what needs ordering'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () =>
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => const StockOverviewScreen())),
                   ),
                 if (me.isAdmin)
                   ListTile(
