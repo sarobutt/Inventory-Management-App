@@ -41,6 +41,9 @@ cur = {"name": "Cream", "barcode": "4005808890507", "available_in_pos": True, "s
 assert s.product_changes(cur, v) == {}
 assert s.product_changes({**cur, "list_price": 20.0}, v) == {"list_price": 21.0}
 assert s.product_changes({**cur, "available_in_pos": False}, v) == {"available_in_pos": True}
+assert s.db_from_url("https://beautysouq.odoo.com") == "beautysouq"
+assert s.db_from_url("https://beautysouq.odoo.com/odoo/action-123") == "beautysouq"
+assert s.db_from_url("beautysouq.odoo.com") == "beautysouq"
 print("helpers OK")
 
 # ---- JSON-RPC client against a fake Odoo ----

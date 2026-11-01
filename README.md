@@ -246,7 +246,7 @@ The **app is the master stock**. A small sync program, [`sync/odoo_sync.py`](syn
 |---|---|
 | `FIREBASE_SERVICE_ACCOUNT` | the **entire contents** of the downloaded `.json` file |
 | `ODOO_URL` | e.g. `https://beautysouq.odoo.com` |
-| `ODOO_DB` | e.g. `beautysouq` |
+| `ODOO_DB` | *optional*: only if your database name differs from your web address |
 | `ODOO_LOGIN` | the sync user's login email |
 | `ODOO_API_KEY` | the API key from step 1 |
 

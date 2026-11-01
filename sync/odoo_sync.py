@@ -26,7 +26,8 @@ Configuration lives in Firestore (set from the app: Profile -> Odoo sync):
 Secrets (GitHub -> Settings -> Secrets and variables -> Actions):
   FIREBASE_SERVICE_ACCOUNT  JSON key from Firebase Console -> Project settings -> Service accounts
   ODOO_URL                  e.g. https://beautysouq.odoo.com
-  ODOO_DB                   database name (usually the part before .odoo.com)
+  ODOO_DB                   optional: database name. If empty it is taken from the address,
+                            e.g. https://beautysouq.odoo.com -> beautysouq
   ODOO_LOGIN                login (email) of the Odoo user that owns the API key
   ODOO_API_KEY              Odoo -> Preferences -> Account Security -> New API Key
 
@@ -62,7 +63,8 @@ class Odoo:
         self._id = 0
         self.uid = self._call("common", "authenticate", db, login, key, {})
         if not self.uid:
-            raise OdooError("Odoo login failed: check ODOO_DB, ODOO_LOGIN and ODOO_API_KEY.")
+            raise OdooError(f"Odoo login failed for database '{db}': check ODOO_LOGIN and ODOO_API_KEY "
+                            "(and ODOO_DB if your database name differs from your web address).")
 
     def _call(self, service: str, method: str, *args):
         self._id += 1
@@ -87,6 +89,14 @@ class Odoo:
 
 
 # ----------------------------------------------------------------------------- helpers
+
+
+def db_from_url(url: str) -> str:
+    """Odoo Online database name = the part before .odoo.com (e.g. beautysouq)."""
+    from urllib.parse import urlparse
+
+    host = urlparse(url if "://" in url else f"https://{url}").hostname or ""
+    return host.split(".")[0] if host else ""
 
 
 def odoo_time(t: dt.datetime) -> str:
@@ -512,7 +522,11 @@ def main() -> int:
 
     try:
         config = db.collection("odooSync").document("config").get().to_dict() or {}
-        odoo = Odoo(os.environ["ODOO_URL"], os.environ["ODOO_DB"], os.environ["ODOO_LOGIN"], os.environ["ODOO_API_KEY"])
+        url = os.environ["ODOO_URL"].strip()
+        if "://" not in url:
+            url = f"https://{url}"
+        odoo_db = (os.environ.get("ODOO_DB") or "").strip() or db_from_url(url)
+        odoo = Odoo(url, odoo_db, os.environ["ODOO_LOGIN"].strip(), os.environ["ODOO_API_KEY"].strip())
         sync = Sync(db, odoo, firestore)
         shops = sync.write_catalog()
 
