@@ -221,6 +221,48 @@ The app now requires signing in with a **username and password**. Each account a
 
 > Prices are hidden from staff everywhere in the app. Someone with technical skills could still read them from the database directly. If prices must be strictly secret, they can be moved to an admin-only collection later.
 
+## Odoo sync (POS ⇄ app stock)
+
+The **app is the master stock**. A small sync program, [`sync/odoo_sync.py`](sync/odoo_sync.py), runs **every ~5 minutes on GitHub Actions**, which is free. No Firebase Blaze plan is needed.
+- **Odoo → app:** every paid POS sale at a linked Odoo shop **reduces stock** in the matching app store, and **refunds add it back**. Each line is applied exactly once and logged in the **Stock audit** as "Odoo POS". Sales whose barcode isn't found wait in **Unmatched POS sales** and are applied automatically once the barcode exists in the app.
+- **App → Odoo** (optional switch): each linked store's stock is copied to its Odoo shop's stock location as an inventory adjustment, so the till shows the same numbers.
+- Products are matched by **barcode**: the app's SKU must equal the product **Barcode** (or Internal Reference) in Odoo.
+
+### One-time setup
+**1. Odoo** (Custom plan, needed for API access)
+1. **Settings → Users → New**: create a user, e.g. "Beauty Souq Sync", with **Point of Sale: Administrator** and **Inventory: Administrator** rights.
+2. Log in as that user, then **click the avatar → My Preferences → Account Security → New API Key**. Name it "Beauty Souq" and **copy the key**, because it's shown once.
+3. **Point of Sale → Configuration → Settings → Inventory**: set *Update quantities in stock* to **In real time**, if available.
+4. Make sure every product has its **Barcode** filled in, matching the app.
+5. Note your **Odoo address** (e.g. `https://beautysouq.odoo.com`) and **database name** (usually `beautysouq`, the part before `.odoo.com`).
+
+**2. Firebase service account** (free, on the Spark plan)
+- Firebase Console → ⚙️ **Project settings → Service accounts → Generate new private key**. A `.json` file downloads. **Keep it secret.**
+
+**3. GitHub secrets**: repository → **Settings → Secrets and variables → Actions → New repository secret**, one for each of these:
+
+| Name | Value |
+|---|---|
+| `FIREBASE_SERVICE_ACCOUNT` | the **entire contents** of the downloaded `.json` file |
+| `ODOO_URL` | e.g. `https://beautysouq.odoo.com` |
+| `ODOO_DB` | e.g. `beautysouq` |
+| `ODOO_LOGIN` | the sync user's login email |
+| `ODOO_API_KEY` | the API key from step 1 |
+
+**4. Start it:** GitHub → **Actions** tab → enable workflows if asked → **Odoo stock sync → Run workflow**. A green tick means it connected. After that it runs by itself every ~5 minutes.
+
+**5. In the app** (admin): **Profile → Odoo sync**
+1. The status should say **Sync is running**, and your **Odoo shops** appear in the list.
+2. **Link each store** to its Odoo shop.
+3. Turn on **Sync POS sales into the app**. Only sales from that moment on are counted.
+4. After checking for a day that POS sales show correctly in the **Stock audit**, turn on **Send app stock to Odoo**.
+
+Also publish the updated `firestore.rules`.
+
+**Notes**
+- GitHub sometimes delays scheduled runs by a few minutes when busy. You can run it any time from **Actions → Odoo stock sync → Run workflow**.
+- This repository is **public**, so the sync logs only counts (no product names or prices), and the keys are stored as encrypted GitHub secrets. GitHub turns off scheduled workflows in public repositories after **60 days without any commits**. If that happens, re-enable it in the Actions tab.
+
 ## Sending Android updates (no cable)
 
 Use **Firebase App Distribution**. It's free and already part of your Firebase project.
@@ -267,6 +309,8 @@ lib/brand.dart                             Beauty Souq name, colours and logo
 lib/auth.dart                              sign-in, profiles, roles, user management
 lib/screens/quick_view_screen.dart         scan a product, see which stores have it
 lib/screens/stock_overview_screen.dart     stock across stores, what needs ordering
+lib/screens/odoo_sync_screen.dart          link stores to Odoo shops, sync status
+sync/odoo_sync.py                          Odoo ⇄ Firestore sync (runs on GitHub Actions)
 lib/orders.dart                            purchase orders, stock deduction, invoice files
 lib/screens/orders_screen.dart             purchase orders list, filters, totals
 lib/screens/order_form_screen.dart         create/complete order, store picker, invoice

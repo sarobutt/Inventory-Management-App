@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../auth.dart';
 import '../widgets.dart';
 import 'audit_screen.dart';
+import 'odoo_sync_screen.dart';
 import 'orders_screen.dart';
 import 'stock_overview_screen.dart';
 import 'requests_screen.dart';
@@ -95,6 +96,14 @@ class ProfileScreen extends StatelessWidget {
                     subtitle: const Text('Every stock change, with filters'),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AuditScreen())),
+                  ),
+                if (me.isAdmin)
+                  ListTile(
+                    leading: const Icon(Icons.sync_alt),
+                    title: const Text('Odoo sync'),
+                    subtitle: const Text('Link stores to Odoo POS, sync status'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const OdooSyncScreen())),
                   ),
                 if (me.isAdmin)
                   ListTile(

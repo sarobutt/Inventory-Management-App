@@ -120,6 +120,19 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // ---------- Odoo sync ----------
+    // The sync program (GitHub Actions) uses a service account and bypasses these rules.
+    match /odooSync/{doc} {
+      allow read: if isAdmin();
+      allow write: if isAdmin() && doc == 'config';
+    }
+    match /odooPending/{id} {
+      allow read, delete: if isAdmin();
+    }
+    match /odooProcessed/{id} {
+      allow read: if isAdmin();
+    }
+
     // ---------- purchase orders (external customers) ----------
     // Admin only. Invoice files are stored in pieces under orderFiles/{orderId}/chunks.
     match /purchaseOrders/{id} {
