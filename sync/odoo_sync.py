@@ -434,7 +434,7 @@ class Sync:
                     company_of[key] = company_id
         self.stats["app_products"] = len(wanted)
         if not wanted:
-            return
+            return  # never hide everything because of an empty/failed read
 
         # Odoo 18+ marks stock-tracked products with is_storable; older versions use type "product".
         tmpl_fields = self.odoo.kw("product.template", "fields_get", [], {"attributes": ["type", "selection"]})
@@ -521,6 +521,24 @@ class Sync:
                     self.stats["odoo_products_updated"] += 1
                 except OdooError:
                     self.stats["odoo_product_errors"] += 1
+
+        # Everything else in Odoo is hidden from the till.
+        if time.monotonic() <= self.deadline:
+            try:
+                self.hide_non_display_products(set(wanted))
+            except OdooError:
+                self.stats["hide_errors"] += 1
+
+    def hide_non_display_products(self, display_keys: set):
+        """Only Display Unit products may be sold: any other product in the till is hidden
+        (available_in_pos = False). Nothing is deleted."""
+        sellable = self.odoo.search_read("product.product", [("available_in_pos", "=", True)], ["id", "barcode"])
+        hide = [p["id"] for p in sellable if code_key(p.get("barcode")) not in display_keys]
+        for i in range(0, len(hide), 200):
+            self.odoo.kw("product.product", "write", [hide[i:i + 200], {"available_in_pos": False}])
+        if hide:
+            self.stats["hidden_from_till"] = len(hide)
+            print(f"till: hid {len(hide)} products that are not in a Display Unit")
 
     def push_stock(self, config: dict, shops: dict, display: dict):
         """Set each synced Odoo shop's stock to the Display Store stock of its company
