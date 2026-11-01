@@ -20,7 +20,8 @@ assert s.stock_after_sale(4, -1) == (5, False)  # refund adds back
 assert s.plan_push({1: 5, 2: 3, 3: 0}, {1: 5.0, 2: 4.0}) == {2: 3}  # 3 has no quant but 0 == 0
 assert s.plan_push({4: 7}, {}) == {4: 7}
 assert s.m2o_id(False) is None and s.m2o_id([5, "x"]) == 5
-assert s.is_display_store(" Display Store ") and s.is_display_store("display store") and not s.is_display_store("Warehouse")
+assert s.is_display_store(" Display Store ") and s.is_display_store("display storage") and s.is_display_store("Display - Doha")
+assert not s.is_display_store("Warehouse") and not s.is_display_store("")
 A = {"ref": "a", "companyId": "acme"}
 B = {"ref": "b", "companyId": "nivea"}
 assert s.choose_target([A], "all") == (A, "")

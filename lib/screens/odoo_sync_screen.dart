@@ -61,7 +61,8 @@ class _OdooSyncScreenState extends State<OdooSyncScreen> {
   /// {odooShopId (as String): companyId | "all"}; a shop is synced if it has a value.
   Map<String, dynamic> get _shopMap => ((_cfg?['shops'] as Map?) ?? const {}).cast<String, dynamic>();
 
-  static bool _isDisplayStore(String name) => name.trim().toLowerCase() == 'display store';
+  /// Same rule as the sync program: the store name contains "display".
+  static bool _isDisplayStore(String name) => name.toLowerCase().contains('display');
 
   Future<void> _update(Map<String, dynamic> data) async {
     try {
@@ -241,7 +242,7 @@ class _OdooSyncScreenState extends State<OdooSyncScreen> {
                     // ---- Display Stores ----
                     const SectionTitle('Display Stores'),
                     Text(
-                      'Odoo sales only take stock from the store named “Display Store” in each company.',
+                      'Only the store with “Display” in its name (e.g. “Display Store”) in each company is linked to Odoo.',
                       style: TextStyle(color: scheme.onSurfaceVariant),
                     ),
                     const SizedBox(height: 6),
@@ -255,8 +256,8 @@ class _OdooSyncScreenState extends State<OdooSyncScreen> {
                               color: has ? Colors.green.shade700 : scheme.error),
                           title: Text(entry.value),
                           subtitle: Text(has
-                              ? 'Has a Display Store'
-                              : 'No store named “Display Store”: its Odoo sales will show as unmatched'),
+                              ? 'Display store: ${_stores.where((st) => st.companyId == entry.key && _isDisplayStore(st.name)).map((st) => st.name).join(', ')}'
+                              : 'No store with “Display” in its name: its products won’t go to Odoo'),
                         );
                       }),
 

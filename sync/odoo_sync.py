@@ -12,7 +12,7 @@ Runs every few minutes (GitHub Actions). The app (Firestore) is the MASTER stock
   2. App -> Odoo:       each linked store's stock is copied to its Odoo stock location
                         (inventory adjustment) whenever the numbers differ.
 
-Only the store named "Display Store" in each company is ever changed by Odoo sales,
+Only stores whose name contains "Display" (e.g. "Display Store") in each company is ever changed by Odoo sales,
 and only Display Store stock is sent to Odoo. A sale line's barcode decides the company.
 
 Configuration lives in Firestore (set from the app: Profile -> Odoo sync):
@@ -155,11 +155,9 @@ def stock_after_sale(current: int, sold: int) -> tuple[int, bool]:
     return new, False
 
 
-DISPLAY_STORE = "display store"
-
-
 def is_display_store(name: str | None) -> bool:
-    return norm(name) == DISPLAY_STORE
+    """Any store whose name contains "display" (Display Store, Display Storage, Display – Doha...)."""
+    return "display" in norm(name)
 
 
 def choose_target(candidates: list[dict], company: str | None):
