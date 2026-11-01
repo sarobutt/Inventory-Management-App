@@ -45,6 +45,11 @@ assert s.product_changes({**cur, "available_in_pos": False}, v) == {"available_i
 assert s.db_from_url("https://beautysouq.odoo.com") == "beautysouq"
 assert s.db_from_url("https://beautysouq.odoo.com/odoo/action-123") == "beautysouq"
 assert s.db_from_url("beautysouq.odoo.com") == "beautysouq"
+assert s.category_change(True, [3, 5], 5) is None
+assert s.category_change(True, [3], 5) == [(4, 5)]
+assert s.category_change(True, [], 5) == [(4, 5)]
+assert s.category_change(False, [5, "Nivea"], 5) is None
+assert s.category_change(False, False, 5) == 5
 print("helpers OK")
 
 # ---- JSON-RPC client against a fake Odoo ----

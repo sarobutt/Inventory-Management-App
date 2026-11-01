@@ -197,6 +197,14 @@ def product_changes(current: dict, wanted: dict) -> dict:
     return out
 
 
+def category_change(field_is_many: bool, current, wanted_id: int):
+    """Odoo write value to put a product in POS category wanted_id, or None if already there."""
+    if field_is_many:
+        ids = list(current or [])
+        return None if wanted_id in ids else [(4, wanted_id)]
+    return None if m2o_id(current) == wanted_id else wanted_id
+
+
 def plan_push(app_qty: dict, odoo_qty: dict) -> dict:
     """Which Odoo products need their stock set, and to what. app_qty / odoo_qty: {odoo_product_id: qty}."""
     return {pid: q for pid, q in app_qty.items() if round(float(odoo_qty.get(pid, 0))) != q}
@@ -379,6 +387,25 @@ class Sync:
         self.db.collection("odooSync").document("state").set({"lastPullAt": self.now}, merge=True)
 
     # ---- 2. app -> Odoo ----
+    def ensure_categories(self, company_ids: set) -> dict:
+        """Make sure POS category "Display Store" exists with a child per company. {companyId: categId}"""
+        cats = self.odoo.search_read("pos.category", [], ["id", "name", "parent_id"])
+        parent = next((c for c in cats if norm(c["name"]) == "display store" and not c.get("parent_id")), None)
+        parent_id = parent["id"] if parent else self.odoo.kw("pos.category", "create", [{"name": "Display Store"}])
+        if isinstance(parent_id, list):
+            parent_id = parent_id[0]
+        children = {norm(c["name"]): c["id"] for c in cats if m2o_id(c.get("parent_id")) == parent_id}
+        out = {}
+        for cid in company_ids:
+            snap = self.db.collection("companies").document(cid).get()
+            name = ((snap.to_dict() or {}).get("name") if snap.exists else "") or "Other"
+            if norm(name) not in children:
+                new_id = self.odoo.kw("pos.category", "create", [{"name": name, "parent_id": parent_id}])
+                children[norm(name)] = new_id[0] if isinstance(new_id, list) else new_id
+                self.stats["pos_categories_created"] += 1
+            out[cid] = children[norm(name)]
+        return out
+
     # ---- 0. app products -> Odoo products ----
     def push_products(self, display: dict):
         """Create/update an Odoo product for every Display Store product (one per barcode).
@@ -396,13 +423,15 @@ class Sync:
 
         # One app product per barcode (first Display Store wins for name/price).
         wanted: dict = {}
-        for store_id in display:
+        company_of: dict = {}
+        for store_id, company_id in display.items():
             for snap in self.db.collection("products").where(filter=FieldFilter("storeId", "==", store_id)).stream():
                 d = snap.to_dict() or {}
                 sku = (d.get("sku") or "").strip()
                 key = code_key(sku)
                 if key and key not in wanted:
                     wanted[key] = product_payload(d.get("name", ""), sku, d.get("retailPrice"), costs.get(snap.id))
+                    company_of[key] = company_id
         self.stats["app_products"] = len(wanted)
         if not wanted:
             return
@@ -416,6 +445,26 @@ class Sync:
         else:
             storable = {}
 
+        # POS categories: "Display Store" with one sub-category per company (brand).
+        categ_field, categ_many = None, False
+        if "pos_categ_ids" in tmpl_fields:
+            categ_field, categ_many = "pos_categ_ids", True
+        elif "pos_categ_id" in tmpl_fields:
+            categ_field = "pos_categ_id"
+        categ_for_company: dict = {}
+        if categ_field:
+            try:
+                categ_for_company = self.ensure_categories({c for c in company_of.values() if c})
+            except OdooError:
+                categ_field = None
+                self.stats["category_errors"] += 1
+
+        def with_category(key: str, vals: dict) -> dict:
+            cid = categ_for_company.get(company_of.get(key))
+            if not categ_field or not cid:
+                return vals
+            return {**vals, categ_field: [(6, 0, [cid])] if categ_many else cid}
+
         keys = list(wanted)
         existing: dict = {}
         for i in range(0, len(keys), 200):
@@ -423,14 +472,15 @@ class Sync:
             for op in self.odoo.search_read(
                 "product.product",
                 [("barcode", "in", variants)],
-                ["id", "barcode", "name", "list_price", "standard_price", "available_in_pos", "sale_ok"],
+                ["id", "barcode", "name", "list_price", "standard_price", "available_in_pos", "sale_ok"]
+                + ([categ_field] if categ_field else []),
                 context={"active_test": False},
             ):
                 existing[code_key(op.get("barcode"))] = op
         self.stats["odoo_products_existing"] = len(existing)
 
         # ---- create missing products, 100 per call ----
-        to_create = [{**vals, **storable} for key, vals in wanted.items() if key not in existing]
+        to_create = [with_category(key, {**vals, **storable}) for key, vals in wanted.items() if key not in existing]
         print(f"products: {len(wanted)} in Display Stores, {len(existing)} already in Odoo, {len(to_create)} to create")
         for i in range(0, len(to_create), 100):
             if time.monotonic() > self.deadline:
@@ -460,6 +510,11 @@ class Sync:
                 print("products: time budget reached during updates, continuing next run")
                 return
             changes = product_changes(op, {**vals, "barcode": op.get("barcode")})
+            cid = categ_for_company.get(company_of.get(key))
+            if categ_field and cid:
+                cat = category_change(categ_many, op.get(categ_field), cid)
+                if cat is not None:
+                    changes[categ_field] = cat
             if changes:
                 try:
                     self.odoo.kw("product.product", "write", [[op["id"]], changes])
