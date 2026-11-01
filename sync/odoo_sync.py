@@ -545,7 +545,8 @@ def main() -> int:
             "lastError": "",
             "lastStats": dict(sync.stats),
         }, merge=True)
-        print("OK", dict(sync.stats))
+        summary = ", ".join(f"{k}={v}" for k, v in sorted(sync.stats.items())) or "nothing to do"
+        print(f"OK: sync {'ON' if config.get('enabled') else 'OFF (turn it on in the app: Profile > Odoo sync)'}; {summary}")
         return 0
     except Exception as e:  # noqa: BLE001 - report any failure to the app
         state_ref.set({"lastRunAt": firestore.SERVER_TIMESTAMP, "lastError": f"{type(e).__name__}: {e}"[:500]}, merge=True)
