@@ -1,13 +1,13 @@
 name: Odoo stock sync
 
-# Each run syncs every 2 minutes for ~55 minutes, then starts the next run itself,
+# Each run syncs every 2 minutes for ~5.5 hours, then starts the next run itself,
 # so the sync keeps going around the clock without relying on GitHub's schedule.
 # The schedule below is only a backup that restarts the chain if it ever stops.
 # To stop syncing completely: GitHub -> Actions -> "Odoo stock sync" -> ... -> Disable workflow
 # (or turn "Sync with the Odoo till" off in the app).
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "17 */2 * * *"
   workflow_dispatch:
 
 # Never run two syncs at the same time.
@@ -22,7 +22,7 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -31,14 +31,14 @@ jobs:
           cache: pip
           cache-dependency-path: sync/requirements.txt
       - run: pip install -r sync/requirements.txt
-      - name: Sync Odoo <-> Firestore (every 2 min for ~55 min)
+      - name: Sync Odoo <-> Firestore (every 2 min for ~5.5 hours)
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           ODOO_URL: ${{ secrets.ODOO_URL }}
           ODOO_DB: ${{ secrets.ODOO_DB }}
           ODOO_LOGIN: ${{ secrets.ODOO_LOGIN }}
           ODOO_API_KEY: ${{ secrets.ODOO_API_KEY }}
-          SYNC_LOOP_MINUTES: "55"
+          SYNC_LOOP_MINUTES: "330"
           SYNC_INTERVAL_SECONDS: "120"
         run: python sync/odoo_sync.py
       - name: Start the next run

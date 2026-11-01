@@ -213,8 +213,98 @@ def plan_push(app_qty: dict, odoo_qty: dict) -> dict:
 # ----------------------------------------------------------------------------- sync
 
 
+class AppCache:
+    """In-memory copy of what the sync needs from Firestore, to stay far below the free
+    plan's daily read limit (50,000). Loaded fully once (and every few hours); after that,
+    each pass only reads documents whose updatedAt changed."""
+
+    REFRESH_HOURS = 6
+
+    def __init__(self, db):
+        self.db = db
+        self.stores: dict = {}      # storeId -> {name, companyId}
+        self.companies: dict = {}   # companyId -> name
+        self.products: dict = {}    # productId -> data (only products in display stores)
+        self.costs: dict = {}       # productId -> cost
+        self.loaded_at: dt.datetime | None = None
+        self.checked_at: dt.datetime | None = None
+
+    @property
+    def display(self) -> dict:
+        return {sid: st.get("companyId", "") for sid, st in self.stores.items() if is_display_store(st.get("name"))}
+
+    def needs_full(self, now: dt.datetime) -> bool:
+        return self.loaded_at is None or now - self.loaded_at > dt.timedelta(hours=self.REFRESH_HOURS)
+
+    def full_load(self, now: dt.datetime) -> None:
+        from google.cloud.firestore_v1.base_query import FieldFilter
+
+        self.stores = {s.id: s.to_dict() or {} for s in self.db.collection("stores").stream()}
+        self.companies = {c.id: (c.to_dict() or {}).get("name", "") for c in self.db.collection("companies").stream()}
+        products = {}
+        for store_id in self.display:
+            for snap in self.db.collection("products").where(filter=FieldFilter("storeId", "==", store_id)).stream():
+                products[snap.id] = snap.to_dict() or {}
+        self.products = products
+        refs = [self.db.collection("productPrices").document(pid) for pid in products]
+        costs = {}
+        for i in range(0, len(refs), 300):
+            for snap in self.db.get_all(refs[i:i + 300]):
+                c = (snap.to_dict() or {}).get("cost") if snap.exists else None
+                if c is not None:
+                    costs[snap.id] = c
+        self.costs = costs
+        self.loaded_at = self.checked_at = now
+        print(f"cache: loaded {len(self.stores)} stores, {len(self.display)} display stores, {len(products)} display products", flush=True)
+
+    def incremental(self, now: dt.datetime) -> set:
+        """Reads only documents changed since the last check. Returns changed product barcodes (code keys)."""
+        from google.cloud.firestore_v1.base_query import FieldFilter
+
+        since = (self.checked_at or now) - dt.timedelta(minutes=3)
+        changed_keys: set = set()
+
+        def changed(col):
+            return self.db.collection(col).where(filter=FieldFilter("updatedAt", ">=", since)).stream()
+
+        display_before = set(self.display)
+        for s in changed("stores"):
+            self.stores[s.id] = s.to_dict() or {}
+        for c in changed("companies"):
+            self.companies[c.id] = (c.to_dict() or {}).get("name", "")
+        new_display = set(self.display) - display_before
+        if new_display or (display_before - set(self.display)):
+            # A store became (or stopped being) a display store: reload everything once.
+            self.full_load(now)
+            return {code_key(p.get("sku")) for p in self.products.values() if code_key(p.get("sku"))}
+
+        display = self.display
+        for snap in changed("products"):
+            d = snap.to_dict() or {}
+            old = self.products.get(snap.id)
+            if old:
+                changed_keys.add(code_key(old.get("sku")))
+            if d.get("storeId") in display:
+                self.products[snap.id] = d
+                changed_keys.add(code_key(d.get("sku")))
+            elif old is not None:
+                del self.products[snap.id]  # moved out of a display store
+        for pr in changed("productPrices"):
+            if pr.id in self.products:
+                c = (pr.to_dict() or {}).get("cost")
+                if c is not None:
+                    self.costs[pr.id] = c
+                changed_keys.add(code_key(self.products[pr.id].get("sku")))
+        self.checked_at = now
+        changed_keys.discard("")
+        return changed_keys
+
+    def forget(self, product_id: str) -> None:
+        self.products.pop(product_id, None)
+
+
 class Sync:
-    def __init__(self, db, odoo: Odoo, firestore_mod):
+    def __init__(self, db, odoo: Odoo, firestore_mod, cache: AppCache | None = None):
         self.db = db
         self.odoo = odoo
         self.fs = firestore_mod
@@ -225,6 +315,7 @@ class Sync:
         # Leave room under the GitHub job limit; unfinished work continues on the next run.
         self.deadline = time.monotonic() + float(os.environ.get("SYNC_TIME_BUDGET_SECONDS", "720"))
         self._place_cache: dict = {}
+        self.cache = cache
 
     # ---- catalog of Odoo shops (shown in the app for linking) ----
     def write_catalog(self) -> dict:
@@ -240,6 +331,8 @@ class Sync:
         return {s["id"]: s for s in shops}
 
     def place(self, store_id: str, company_id: str):
+        if self.cache and store_id in self.cache.stores:
+            return self.cache.stores[store_id].get("name", ""), self.cache.companies.get(company_id, "")
         key = (store_id, company_id)
         if key not in self._place_cache:
             s = self.db.collection("stores").document(store_id).get()
@@ -251,7 +344,9 @@ class Sync:
         return self._place_cache[key]
 
     def display_stores(self) -> dict:
-        """{storeId: companyId} for every store named "Display Store"."""
+        """{storeId: companyId} for every display store."""
+        if self.cache:
+            return self.cache.display
         out = {}
         for st in self.db.collection("stores").stream():
             d = st.to_dict() or {}
@@ -262,6 +357,14 @@ class Sync:
     def find_candidates(self, codes: list[str], display: dict) -> list[dict]:
         """Products whose SKU equals one of the Odoo codes, in Display Stores only."""
         from google.cloud.firestore_v1.base_query import FieldFilter
+
+        if self.cache:
+            keys = {code_key(c) for c in codes if c}
+            return [
+                {"ref": self.db.collection("products").document(pid), "companyId": d.get("companyId", "")}
+                for pid, d in self.cache.products.items()
+                if code_key(d.get("sku")) in keys and d.get("storeId") in display
+            ]
 
         found = {}
         for code in codes:
@@ -295,6 +398,8 @@ class Sync:
             after, short = stock_after_sale(before, sold)
             store_name, company_name = sync.place(d.get("storeId", ""), d.get("companyId", ""))
             tx.update(prod_ref, {"quantity": after, "updatedAt": fs.SERVER_TIMESTAMP})
+            if sync.cache and prod_ref.id in sync.cache.products:
+                sync.cache.products[prod_ref.id]["quantity"] = after  # keep the cache current
             note = f"Odoo POS {'refund' if sold < 0 else 'sale'} {order_name}"
             if short:
                 note += f" (sold {sold}, only {before} in stock in the app)"
@@ -323,16 +428,14 @@ class Sync:
 
         return run(self.db.transaction())
 
-    def pull_sales(self, config: dict, shops: dict, display: dict):
+    def pull_sales(self, config: dict, shops: dict, display: dict, last_pull: dt.datetime | None = None):
         shop_company = {int(k): v for k, v in (config.get("shops") or {}).items() if v}
         if not shop_company or not display:
             return
 
-        state = self.db.collection("odooSync").document("state").get().to_dict() or {}
         start = config.get("startFrom")
         start = start if isinstance(start, dt.datetime) else self.now
-        last = state.get("lastPullAt")
-        since = max(start, (last - dt.timedelta(minutes=30)) if isinstance(last, dt.datetime) else start)
+        since = max(start, (last_pull - dt.timedelta(minutes=30)) if isinstance(last_pull, dt.datetime) else start)
 
         orders = self.odoo.search_read(
             "pos.order",
@@ -381,10 +484,14 @@ class Sync:
                 }, merge=True)
                 self.stats["unmatched"] += 1
                 continue
-            if self.apply_line(line_key, target["ref"], qty, order_name, prod.get("display_name", "")):
-                self.stats["lines_applied"] += 1
-
-        self.db.collection("odooSync").document("state").set({"lastPullAt": self.now}, merge=True)
+            try:
+                if self.apply_line(line_key, target["ref"], qty, order_name, prod.get("display_name", "")):
+                    self.stats["lines_applied"] += 1
+            except LookupError:
+                # Product was deleted in the app since the cache was loaded: retry next pass.
+                if self.cache:
+                    self.cache.forget(target["ref"].id)
+                self.stats["retry_next_pass"] += 1
 
     # ---- 2. app -> Odoo ----
     def ensure_categories(self, company_ids: set) -> dict:
@@ -397,8 +504,11 @@ class Sync:
         children = {norm(c["name"]): c["id"] for c in cats if m2o_id(c.get("parent_id")) == parent_id}
         out = {}
         for cid in company_ids:
-            snap = self.db.collection("companies").document(cid).get()
-            name = ((snap.to_dict() or {}).get("name") if snap.exists else "") or "Other"
+            if self.cache and cid in self.cache.companies:
+                name = self.cache.companies[cid] or "Other"
+            else:
+                snap = self.db.collection("companies").document(cid).get()
+                name = ((snap.to_dict() or {}).get("name") if snap.exists else "") or "Other"
             if norm(name) not in children:
                 new_id = self.odoo.kw("pos.category", "create", [{"name": name, "parent_id": parent_id}])
                 children[norm(name)] = new_id[0] if isinstance(new_id, list) else new_id
@@ -427,32 +537,26 @@ class Sync:
             print(f"check: could not read till settings: {e}")
 
     # ---- 0. app products -> Odoo products ----
-    def push_products(self, display: dict):
-        """Create/update an Odoo product for every Display Store product (one per barcode).
-        Creates in batches and stops before the time budget; the rest continues next run."""
+    def push_products(self, display: dict, only_keys: set | None = None):
+        """Create/update an Odoo product for every Display Store product (one per barcode),
+        from the in-memory cache. only_keys limits it to changed barcodes (no hiding then)."""
         import time
-
-        from google.cloud.firestore_v1.base_query import FieldFilter
-
-        # Cost prices, read once (admin-only collection).
-        costs = {}
-        for pr in self.db.collection("productPrices").stream():
-            c = (pr.to_dict() or {}).get("cost")
-            if c is not None:
-                costs[pr.id] = c
 
         # One app product per barcode (first Display Store wins for name/price).
         wanted: dict = {}
         company_of: dict = {}
-        for store_id, company_id in display.items():
-            for snap in self.db.collection("products").where(filter=FieldFilter("storeId", "==", store_id)).stream():
-                d = snap.to_dict() or {}
-                sku = (d.get("sku") or "").strip()
-                key = code_key(sku)
-                if key and key not in wanted:
-                    wanted[key] = product_payload(d.get("name", ""), sku, d.get("retailPrice"), costs.get(snap.id))
-                    company_of[key] = company_id
-        self.stats["app_products"] = len(wanted)
+        for pid, d in sorted(self.cache.products.items()):
+            if d.get("storeId") not in display:
+                continue
+            sku = (d.get("sku") or "").strip()
+            key = code_key(sku)
+            if key and key not in wanted:
+                wanted[key] = product_payload(d.get("name", ""), sku, d.get("retailPrice"), self.cache.costs.get(pid))
+                company_of[key] = display[d.get("storeId")]
+        all_keys = set(wanted)
+        if only_keys is not None:
+            wanted = {k: v for k, v in wanted.items() if k in only_keys}
+        self.stats["app_products"] = len(all_keys)
         if not wanted:
             return  # never hide everything because of an empty/failed read
 
@@ -501,7 +605,8 @@ class Sync:
 
         # ---- create missing products, 100 per call ----
         to_create = [with_category(key, {**vals, **storable}) for key, vals in wanted.items() if key not in existing]
-        print(f"products: {len(wanted)} in Display Stores, {len(existing)} already in Odoo, {len(to_create)} to create")
+        if only_keys is None or to_create:
+            print(f"products: {len(wanted)} checked, {len(existing)} already in Odoo, {len(to_create)} to create", flush=True)
         for i in range(0, len(to_create), 100):
             if time.monotonic() > self.deadline:
                 self.stats["odoo_products_left_for_next_run"] = len(to_create) - i
@@ -519,7 +624,7 @@ class Sync:
                         self.stats["odoo_products_created"] += 1
                     except OdooError:
                         self.stats["odoo_product_errors"] += 1
-            print(f"products: created {self.stats['odoo_products_created']}/{len(to_create)}")
+            print(f"products: created {self.stats['odoo_products_created']}/{len(to_create)}", flush=True)
 
         # ---- update changed names/prices ----
         for key, vals in wanted.items():
@@ -542,10 +647,10 @@ class Sync:
                 except OdooError:
                     self.stats["odoo_product_errors"] += 1
 
-        # Everything else in Odoo is hidden from the till.
-        if time.monotonic() <= self.deadline:
+        # Everything else in Odoo is hidden from the till (full passes only).
+        if only_keys is None and time.monotonic() <= self.deadline:
             try:
-                self.hide_non_display_products(set(wanted))
+                self.hide_non_display_products(all_keys)
             except OdooError:
                 self.stats["hide_errors"] += 1
 
@@ -575,19 +680,17 @@ class Sync:
         if hide:
             print(f"till: {len(hide)} products are not in a Display Unit; hidden {hidden}, refused by Odoo {refused}")
 
-    def push_stock(self, config: dict, shops: dict, display: dict):
+    def push_stock(self, config: dict, shops: dict, display: dict, only_keys: set | None = None):
         """Set each synced Odoo shop's stock to the Display Store stock of its company
-        (or of all companies, summed per barcode, if the shop is linked to "all")."""
-        from google.cloud.firestore_v1.base_query import FieldFilter
-
+        (or of all companies, summed per barcode, if the shop is linked to "all").
+        Uses the in-memory cache; only_keys limits it to changed barcodes."""
         # Display Store stock per company: {companyId: {code: qty}}
         per_company: dict = defaultdict(lambda: defaultdict(int))
-        for store_id, company_id in display.items():
-            for snap in self.db.collection("products").where(filter=FieldFilter("storeId", "==", store_id)).stream():
-                d = snap.to_dict() or {}
-                code = code_key(d.get("sku"))
-                if code:
-                    per_company[company_id][code] += int(d.get("quantity") or 0)
+        for d in self.cache.products.values():
+            company_id = display.get(d.get("storeId"))
+            code = code_key(d.get("sku"))
+            if company_id is not None and code and (only_keys is None or code in only_keys):
+                per_company[company_id][code] += int(d.get("quantity") or 0)
 
         for shop_key, company in (config.get("shops") or {}).items():
             if not company:
@@ -653,53 +756,89 @@ class Sync:
                     self.stats["odoo_update_errors"] += 1
 
 
-def run_once(db, firestore, first: bool) -> bool:
-    """One sync pass. Returns True on success. Errors are reported to the app (odooSync/state)."""
-    state_ref = db.collection("odooSync").document("state")
-    try:
-        config = db.collection("odooSync").document("config").get().to_dict() or {}
+class Runner:
+    """Keeps the Odoo login, the shop catalog and the Firestore cache between passes."""
+
+    def __init__(self, db, firestore):
+        self.db = db
+        self.fs = firestore
+        self.cache = AppCache(db)
+        self.odoo: Odoo | None = None
+        self.shops: dict | None = None
+        self.last_pull: dt.datetime | None = None
+        self.first = True
+
+    def login(self) -> Odoo:
         url = os.environ["ODOO_URL"].strip()
         if "://" not in url:
             url = f"https://{url}"
         odoo_db = (os.environ.get("ODOO_DB") or "").strip() or db_from_url(url)
-        odoo = Odoo(url, odoo_db, os.environ["ODOO_LOGIN"].strip(), os.environ["ODOO_API_KEY"].strip())
-        sync = Sync(db, odoo, firestore)
-        shops = sync.write_catalog()
-        if first:
-            sync.diagnose_till()
+        return Odoo(url, odoo_db, os.environ["ODOO_LOGIN"].strip(), os.environ["ODOO_API_KEY"].strip())
 
-        if config.get("enabled"):
-            display = sync.display_stores()
-            sync.stats["display_stores"] = len(display)
-            if config.get("syncProducts", True):
-                sync.push_products(display)
-            sync.pull_sales(config, shops, display)
-            if config.get("pushEnabled"):
-                sync.push_stock(config, shops, display)
-
-        state_ref.set({
-            "lastRunAt": firestore.SERVER_TIMESTAMP,
-            "lastOkAt": firestore.SERVER_TIMESTAMP,
-            "lastError": "",
-            "lastStats": dict(sync.stats),
-        }, merge=True)
-        summary = ", ".join(f"{k}={v}" for k, v in sorted(sync.stats.items())) or "nothing to do"
-        stamp = dt.datetime.now(dt.timezone.utc).strftime("%H:%M:%S")
-        print(f"{stamp} OK: sync {'ON' if config.get('enabled') else 'OFF (turn it on in the app: Profile > Odoo sync)'}; {summary}", flush=True)
-        return True
-    except Exception as e:  # noqa: BLE001 - report any failure to the app
+    def run_once(self) -> bool:
+        db, firestore = self.db, self.fs
+        state_ref = db.collection("odooSync").document("state")
         try:
-            state_ref.set({"lastRunAt": firestore.SERVER_TIMESTAMP, "lastError": f"{type(e).__name__}: {e}"[:500]}, merge=True)
-        except Exception:  # noqa: BLE001
-            pass
-        print("FAILED:", type(e).__name__, flush=True)
-        traceback.print_exc(limit=3)
-        return False
+            config = db.collection("odooSync").document("config").get().to_dict() or {}
+            if self.last_pull is None:
+                st = state_ref.get().to_dict() or {}
+                self.last_pull = st.get("lastPullAt") if isinstance(st.get("lastPullAt"), dt.datetime) else None
+            if self.odoo is None:
+                self.odoo = self.login()
+            sync = Sync(db, self.odoo, firestore, self.cache)
+            now = sync.now
+
+            full = self.cache.needs_full(now)
+            if full or self.shops is None:
+                self.shops = sync.write_catalog()
+            if self.first:
+                sync.diagnose_till()
+
+            if config.get("enabled"):
+                if full:
+                    self.cache.full_load(now)
+                    changed = None  # everything
+                else:
+                    changed = self.cache.incremental(now)
+                display = self.cache.display
+                sync.stats["display_stores"] = len(display)
+                if config.get("syncProducts", True) and (changed is None or changed):
+                    sync.push_products(display, changed)
+                sync.pull_sales(config, self.shops, display, self.last_pull)
+                self.last_pull = now
+                if config.get("pushEnabled") and (changed is None or changed):
+                    sync.push_stock(config, self.shops, display, changed)
+
+            state_ref.set({
+                "lastRunAt": firestore.SERVER_TIMESTAMP,
+                "lastOkAt": firestore.SERVER_TIMESTAMP,
+                "lastPullAt": self.last_pull,
+                "lastError": "",
+                "lastStats": dict(sync.stats),
+            }, merge=True)
+            self.first = False
+            summary = ", ".join(f"{k}={v}" for k, v in sorted(sync.stats.items())) or "nothing new"
+            stamp = dt.datetime.now(dt.timezone.utc).strftime("%H:%M:%S")
+            print(f"{stamp} OK: sync {'ON' if config.get('enabled') else 'OFF (turn it on in the app: Profile > Odoo sync)'}; {summary}", flush=True)
+            return True
+        except Exception as e:  # noqa: BLE001 - report any failure to the app
+            self.odoo = None  # log in again next pass
+            quota = "ResourceExhausted" in type(e).__name__ or "Quota exceeded" in str(e)
+            msg = ("Firebase free daily limit reached – the sync waits until it resets" if quota
+                   else f"{type(e).__name__}: {e}")[:500]
+            try:
+                state_ref.set({"lastRunAt": firestore.SERVER_TIMESTAMP, "lastError": msg}, merge=True)
+            except Exception:  # noqa: BLE001
+                pass
+            print("FAILED:", "Firebase daily quota exceeded" if quota else type(e).__name__, flush=True)
+            if not quota:
+                traceback.print_exc(limit=3)
+            return False
 
 
 def main() -> int:
-    """Runs the sync repeatedly: every SYNC_INTERVAL_SECONDS for SYNC_LOOP_MINUTES (default:
-    every 2 minutes for 55 minutes). The GitHub workflow then starts the next run itself."""
+    """Runs the sync repeatedly: every SYNC_INTERVAL_SECONDS for SYNC_LOOP_MINUTES. The GitHub
+    workflow then starts the next run itself."""
     import time
 
     import firebase_admin
@@ -707,20 +846,23 @@ def main() -> int:
 
     sa = json.loads(os.environ["FIREBASE_SERVICE_ACCOUNT"])
     firebase_admin.initialize_app(credentials.Certificate(sa))
-    db = firestore.client()
+    runner = Runner(firestore.client(), firestore)
 
     loop_seconds = float(os.environ.get("SYNC_LOOP_MINUTES", "0")) * 60
     interval = float(os.environ.get("SYNC_INTERVAL_SECONDS", "120"))
     end = time.monotonic() + loop_seconds
-    first = True
     ok_any = False
+    failures = 0
     while True:
         started = time.monotonic()
-        ok_any = run_once(db, firestore, first) or ok_any
-        first = False
+        ok = runner.run_once()
+        ok_any = ok or ok_any
+        failures = 0 if ok else failures + 1
         if time.monotonic() + interval > end:
             break
-        time.sleep(max(5.0, interval - (time.monotonic() - started)))
+        # Back off after repeated failures (e.g. quota reached): up to 30 minutes.
+        wait = interval if failures < 2 else min(1800.0, interval * (2 ** (failures - 1)))
+        time.sleep(max(5.0, wait - (time.monotonic() - started)))
     return 0 if ok_any else 1
 
 
