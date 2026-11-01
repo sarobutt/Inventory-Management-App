@@ -223,7 +223,7 @@ The app now requires signing in with a **username and password**. Each account a
 
 ## Odoo sync (POS ⇄ app stock)
 
-The **app is the master stock**. A small sync program, [`sync/odoo_sync.py`](sync/odoo_sync.py), runs **every ~5 minutes on GitHub Actions**, which is free. No Firebase Blaze plan is needed.
+The **app is the master stock**. A small sync program, [`sync/odoo_sync.py`](sync/odoo_sync.py), runs **continuously on GitHub Actions (every 2 minutes)**, which is free. Each run lasts about an hour and starts the next one itself. No Firebase Blaze plan is needed.
 - **Only the store named "Display Store" in each company is affected.** Every paid POS sale **reduces that company's Display Store stock** (the company is found from the product's barcode), and **refunds add it back**. Warehouses and other stores are never touched by Odoo. Each line is applied exactly once and logged in the **Stock audit** as "Odoo POS". Sales whose barcode isn't found wait in **Unmatched POS sales** and are applied automatically once the barcode exists in the app.
 - **App → Odoo** (optional switch): the **Display Store** stock is copied to each synced Odoo shop's stock location as an inventory adjustment, so the till shows the same numbers.
 - **Products are copied to Odoo automatically.** Every product in a Display Store is created in Odoo with its name, barcode (SKU), retail price and cost, and name and price changes follow. **Nothing has to be registered in Odoo by hand.** Sales are matched back by barcode. Any other product in Odoo (e.g. demo products, or one moved out of a Display Unit) is **hidden from the till**, so the till only sells Display Unit products.

@@ -653,15 +653,9 @@ class Sync:
                     self.stats["odoo_update_errors"] += 1
 
 
-def main() -> int:
-    import firebase_admin
-    from firebase_admin import credentials, firestore
-
-    sa = json.loads(os.environ["FIREBASE_SERVICE_ACCOUNT"])
-    firebase_admin.initialize_app(credentials.Certificate(sa))
-    db = firestore.client()
+def run_once(db, firestore, first: bool) -> bool:
+    """One sync pass. Returns True on success. Errors are reported to the app (odooSync/state)."""
     state_ref = db.collection("odooSync").document("state")
-
     try:
         config = db.collection("odooSync").document("config").get().to_dict() or {}
         url = os.environ["ODOO_URL"].strip()
@@ -671,7 +665,8 @@ def main() -> int:
         odoo = Odoo(url, odoo_db, os.environ["ODOO_LOGIN"].strip(), os.environ["ODOO_API_KEY"].strip())
         sync = Sync(db, odoo, firestore)
         shops = sync.write_catalog()
-        sync.diagnose_till()
+        if first:
+            sync.diagnose_till()
 
         if config.get("enabled"):
             display = sync.display_stores()
@@ -689,13 +684,44 @@ def main() -> int:
             "lastStats": dict(sync.stats),
         }, merge=True)
         summary = ", ".join(f"{k}={v}" for k, v in sorted(sync.stats.items())) or "nothing to do"
-        print(f"OK: sync {'ON' if config.get('enabled') else 'OFF (turn it on in the app: Profile > Odoo sync)'}; {summary}")
-        return 0
+        stamp = dt.datetime.now(dt.timezone.utc).strftime("%H:%M:%S")
+        print(f"{stamp} OK: sync {'ON' if config.get('enabled') else 'OFF (turn it on in the app: Profile > Odoo sync)'}; {summary}", flush=True)
+        return True
     except Exception as e:  # noqa: BLE001 - report any failure to the app
-        state_ref.set({"lastRunAt": firestore.SERVER_TIMESTAMP, "lastError": f"{type(e).__name__}: {e}"[:500]}, merge=True)
-        print("FAILED:", type(e).__name__)
+        try:
+            state_ref.set({"lastRunAt": firestore.SERVER_TIMESTAMP, "lastError": f"{type(e).__name__}: {e}"[:500]}, merge=True)
+        except Exception:  # noqa: BLE001
+            pass
+        print("FAILED:", type(e).__name__, flush=True)
         traceback.print_exc(limit=3)
-        return 1
+        return False
+
+
+def main() -> int:
+    """Runs the sync repeatedly: every SYNC_INTERVAL_SECONDS for SYNC_LOOP_MINUTES (default:
+    every 2 minutes for 55 minutes). The GitHub workflow then starts the next run itself."""
+    import time
+
+    import firebase_admin
+    from firebase_admin import credentials, firestore
+
+    sa = json.loads(os.environ["FIREBASE_SERVICE_ACCOUNT"])
+    firebase_admin.initialize_app(credentials.Certificate(sa))
+    db = firestore.client()
+
+    loop_seconds = float(os.environ.get("SYNC_LOOP_MINUTES", "0")) * 60
+    interval = float(os.environ.get("SYNC_INTERVAL_SECONDS", "120"))
+    end = time.monotonic() + loop_seconds
+    first = True
+    ok_any = False
+    while True:
+        started = time.monotonic()
+        ok_any = run_once(db, firestore, first) or ok_any
+        first = False
+        if time.monotonic() + interval > end:
+            break
+        time.sleep(max(5.0, interval - (time.monotonic() - started)))
+    return 0 if ok_any else 1
 
 
 if __name__ == "__main__":
