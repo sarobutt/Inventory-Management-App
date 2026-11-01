@@ -34,6 +34,13 @@ assert "123456789012" in s.code_variants("0123456789012")
 assert s.code_key("0123456789012") == s.code_key("123456789012")
 assert s.code_variants("AC-001") == {"AC-001"}
 assert s.code_variants("") == set()
+v = s.product_payload("Cream", "4005808890507", 21, 9.5)
+assert v == {"name": "Cream", "barcode": "4005808890507", "available_in_pos": True, "sale_ok": True, "list_price": 21.0, "standard_price": 9.5}
+assert s.product_payload("", "123", None, None)["name"] == "123" and "list_price" not in s.product_payload("", "123", None, None)
+cur = {"name": "Cream", "barcode": "4005808890507", "available_in_pos": True, "sale_ok": True, "list_price": 21.0, "standard_price": 9.5}
+assert s.product_changes(cur, v) == {}
+assert s.product_changes({**cur, "list_price": 20.0}, v) == {"list_price": 21.0}
+assert s.product_changes({**cur, "available_in_pos": False}, v) == {"available_in_pos": True}
 print("helpers OK")
 
 # ---- JSON-RPC client against a fake Odoo ----

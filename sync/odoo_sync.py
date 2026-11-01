@@ -3,6 +3,9 @@ Beauty Souq <-> Odoo stock sync.
 
 Runs every few minutes (GitHub Actions). The app (Firestore) is the MASTER stock.
 
+  0. App -> Odoo products: every product in a company's "Display Store" is created (or its
+                        name/price updated) in Odoo, so the till can scan it. Nothing has to be
+                        registered in Odoo by hand.
   1. Odoo POS -> app:   paid POS orders (sales and refunds) change stock in the linked store
                         and are written to the stock audit. Every order line is applied exactly
                         once. Lines whose barcode isn't found are kept as "pending" and retried.
@@ -161,6 +164,29 @@ def choose_target(candidates: list[dict], company: str | None):
     if not candidates:
         return None, "not found in any Display Store"
     return None, "barcode is in several companies' Display Stores – link this Odoo shop to one company"
+
+
+def product_payload(name: str, barcode: str, retail, cost) -> dict:
+    """Odoo product fields we manage from the app."""
+    vals = {"name": name or barcode, "barcode": barcode, "available_in_pos": True, "sale_ok": True}
+    if retail is not None:
+        vals["list_price"] = float(retail)
+    if cost is not None:
+        vals["standard_price"] = float(cost)
+    return vals
+
+
+def product_changes(current: dict, wanted: dict) -> dict:
+    """Only the fields that differ (prices compared to the cent)."""
+    out = {}
+    for k, v in wanted.items():
+        cur = current.get(k)
+        if isinstance(v, float):
+            if cur is None or cur is False or abs(float(cur) - v) >= 0.005:
+                out[k] = v
+        elif cur != v:
+            out[k] = v
+    return out
 
 
 def plan_push(app_qty: dict, odoo_qty: dict) -> dict:
@@ -341,6 +367,67 @@ class Sync:
         self.db.collection("odooSync").document("state").set({"lastPullAt": self.now}, merge=True)
 
     # ---- 2. app -> Odoo ----
+    # ---- 0. app products -> Odoo products ----
+    def push_products(self, display: dict):
+        """Create/update an Odoo product for every Display Store product (one per barcode)."""
+        from google.cloud.firestore_v1.base_query import FieldFilter
+
+        # One app product per barcode (first Display Store wins for name/price).
+        wanted: dict = {}
+        for store_id in display:
+            for snap in self.db.collection("products").where(filter=FieldFilter("storeId", "==", store_id)).stream():
+                d = snap.to_dict() or {}
+                sku = (d.get("sku") or "").strip()
+                key = code_key(sku)
+                if not key or key in wanted:
+                    continue
+                cost = None
+                try:
+                    pr = self.db.collection("productPrices").document(snap.id).get()
+                    cost = (pr.to_dict() or {}).get("cost") if pr.exists else None
+                except Exception:  # noqa: BLE001 - cost is optional
+                    pass
+                wanted[key] = product_payload(d.get("name", ""), sku, d.get("retailPrice"), cost)
+        if not wanted:
+            return
+
+        # Odoo 18+ marks stock-tracked products with is_storable; older versions use type "product".
+        tmpl_fields = self.odoo.kw("product.template", "fields_get", [], {"attributes": ["type", "selection"]})
+        if "is_storable" in tmpl_fields:
+            storable = {"type": "consu", "is_storable": True}
+        elif any(v == "product" for v, _ in (tmpl_fields.get("type", {}).get("selection") or [])):
+            storable = {"type": "product"}
+        else:
+            storable = {}
+
+        keys = list(wanted)
+        existing: dict = {}
+        for i in range(0, len(keys), 100):
+            variants = list({v for k in keys[i:i + 100] for v in code_variants(k)})
+            for op in self.odoo.search_read(
+                "product.product",
+                [("barcode", "in", variants)],
+                ["id", "barcode", "name", "list_price", "standard_price", "available_in_pos", "sale_ok", "product_tmpl_id"],
+                context={"active_test": False},
+            ):
+                existing[code_key(op.get("barcode"))] = op
+
+        for key, vals in wanted.items():
+            try:
+                op = existing.get(key)
+                if op is None:
+                    vals = {**vals, **storable}
+                    self.odoo.kw("product.template", "create", [vals])
+                    self.stats["odoo_products_created"] += 1
+                else:
+                    vals = {**vals, "barcode": op.get("barcode")}  # keep Odoo's spelling of the barcode
+                    changes = product_changes(op, vals)
+                    if changes:
+                        self.odoo.kw("product.product", "write", [[op["id"]], changes])
+                        self.stats["odoo_products_updated"] += 1
+            except OdooError:
+                self.stats["odoo_product_errors"] += 1
+
     def push_stock(self, config: dict, shops: dict, display: dict):
         """Set each synced Odoo shop's stock to the Display Store stock of its company
         (or of all companies, summed per barcode, if the shop is linked to "all")."""
@@ -432,6 +519,8 @@ def main() -> int:
         if config.get("enabled"):
             display = sync.display_stores()
             sync.stats["display_stores"] = len(display)
+            if config.get("syncProducts", True):
+                sync.push_products(display)
             sync.pull_sales(config, shops, display)
             if config.get("pushEnabled"):
                 sync.push_stock(config, shops, display)

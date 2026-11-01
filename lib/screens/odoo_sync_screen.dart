@@ -188,7 +188,9 @@ class _OdooSyncScreenState extends State<OdooSyncScreen> {
                             Text('Last run: ${_when(lastRun)}'),
                             Text('Last successful: ${_when(_st['lastOkAt'])}'),
                             if (stats.isNotEmpty)
-                              Text('Last run: ${stats['lines_applied'] ?? 0} POS lines applied, '
+                              Text('Last run: ${(stats['odoo_products_created'] ?? 0)} products added to Odoo, '
+                                  '${(stats['odoo_products_updated'] ?? 0)} updated, '
+                                  '${stats['lines_applied'] ?? 0} POS lines applied, '
                                   '${stats['odoo_updates'] ?? 0} Odoo stock updates'
                                   '${(stats['unmatched'] ?? 0) > 0 ? ', ${stats['unmatched']} unmatched' : ''}'),
                             if (lastError.isNotEmpty)
@@ -216,8 +218,9 @@ class _OdooSyncScreenState extends State<OdooSyncScreen> {
                     // ---- Switches ----
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('Sync POS sales into the app'),
-                      subtitle: const Text('Sales reduce Display Store stock, refunds add it back (stock audit)'),
+                      title: const Text('Sync with the Odoo till'),
+                      subtitle: const Text('Display Store products are added to Odoo automatically. Sales reduce '
+                          'Display Store stock, refunds add it back (stock audit).'),
                       value: enabled,
                       onChanged: _setEnabled,
                     ),

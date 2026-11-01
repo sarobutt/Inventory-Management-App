@@ -226,14 +226,15 @@ The app now requires signing in with a **username and password**. Each account a
 The **app is the master stock**. A small sync program, [`sync/odoo_sync.py`](sync/odoo_sync.py), runs **every ~5 minutes on GitHub Actions**, which is free. No Firebase Blaze plan is needed.
 - **Only the store named "Display Store" in each company is affected.** Every paid POS sale **reduces that company's Display Store stock** (the company is found from the product's barcode), and **refunds add it back**. Warehouses and other stores are never touched by Odoo. Each line is applied exactly once and logged in the **Stock audit** as "Odoo POS". Sales whose barcode isn't found wait in **Unmatched POS sales** and are applied automatically once the barcode exists in the app.
 - **App → Odoo** (optional switch): the **Display Store** stock is copied to each synced Odoo shop's stock location as an inventory adjustment, so the till shows the same numbers.
-- Products are matched by **barcode**: the app's SKU must equal the product **Barcode** (or Internal Reference) in Odoo.
+- **Products are copied to Odoo automatically.** Every product in a Display Store is created in Odoo with its name, barcode (SKU), retail price and cost, and name and price changes follow. **Nothing has to be registered in Odoo by hand.** Sales are matched back by barcode.
 
 ### One-time setup
 **1. Odoo** (Custom plan, needed for API access)
 1. **Settings → Users → New**: create a user, e.g. "Beauty Souq Sync", with **Point of Sale: Administrator** and **Inventory: Administrator** rights.
+   Also install the **Point of Sale** app, and create your till under **Point of Sale → Configuration → Point of Sales** if it doesn't exist yet. You don't need to add any products in Odoo.
 2. Log in as that user, then **click the avatar → My Preferences → Account Security → New API Key**. Name it "Beauty Souq" and **copy the key**, because it's shown once.
 3. **Point of Sale → Configuration → Settings → Inventory**: set *Update quantities in stock* to **In real time**, if available.
-4. Make sure every product has its **Barcode** filled in, matching the app.
+4. (Nothing to do for products: the sync creates them.)
 5. Note your **Odoo address** (e.g. `https://beautysouq.odoo.com`) and **database name** (usually `beautysouq`, the part before `.odoo.com`).
 
 **2. Firebase service account** (free, on the Spark plan)
