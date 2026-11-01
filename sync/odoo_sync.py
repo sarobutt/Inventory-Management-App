@@ -534,11 +534,26 @@ class Sync:
         (available_in_pos = False). Nothing is deleted."""
         sellable = self.odoo.search_read("product.product", [("available_in_pos", "=", True)], ["id", "barcode"])
         hide = [p["id"] for p in sellable if code_key(p.get("barcode")) not in display_keys]
+        hidden = refused = 0
         for i in range(0, len(hide), 200):
-            self.odoo.kw("product.product", "write", [hide[i:i + 200], {"available_in_pos": False}])
+            batch = hide[i:i + 200]
+            try:
+                self.odoo.kw("product.product", "write", [batch, {"available_in_pos": False}])
+                hidden += len(batch)
+            except OdooError:
+                # Odoo refuses some (e.g. product in an open till session): do them one by one.
+                for pid in batch:
+                    try:
+                        self.odoo.kw("product.product", "write", [[pid], {"available_in_pos": False}])
+                        hidden += 1
+                    except OdooError:
+                        refused += 1
+        if hidden:
+            self.stats["hidden_from_till"] = hidden
+        if refused:
+            self.stats["could_not_hide_yet"] = refused
         if hide:
-            self.stats["hidden_from_till"] = len(hide)
-            print(f"till: hid {len(hide)} products that are not in a Display Unit")
+            print(f"till: {len(hide)} products are not in a Display Unit; hidden {hidden}, refused by Odoo {refused}")
 
     def push_stock(self, config: dict, shops: dict, display: dict):
         """Set each synced Odoo shop's stock to the Display Store stock of its company
