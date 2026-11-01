@@ -20,6 +20,15 @@ assert s.stock_after_sale(4, -1) == (5, False)  # refund adds back
 assert s.plan_push({1: 5, 2: 3, 3: 0}, {1: 5.0, 2: 4.0}) == {2: 3}  # 3 has no quant but 0 == 0
 assert s.plan_push({4: 7}, {}) == {4: 7}
 assert s.m2o_id(False) is None and s.m2o_id([5, "x"]) == 5
+assert s.is_display_store(" Display Store ") and s.is_display_store("display store") and not s.is_display_store("Warehouse")
+A = {"ref": "a", "companyId": "acme"}
+B = {"ref": "b", "companyId": "nivea"}
+assert s.choose_target([A], "all") == (A, "")
+assert s.choose_target([A], None) == (A, "")
+assert s.choose_target([A, B], "nivea") == (B, "")
+assert s.choose_target([A, B], "all")[0] is None and "several" in s.choose_target([A, B], "all")[1]
+assert s.choose_target([], "all") == (None, "not found in any Display Store")
+assert s.choose_target([A], "nivea")[0] is None
 print("helpers OK")
 
 # ---- JSON-RPC client against a fake Odoo ----

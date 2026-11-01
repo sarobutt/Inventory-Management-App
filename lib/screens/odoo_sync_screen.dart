@@ -58,7 +58,10 @@ class _OdooSyncScreenState extends State<OdooSyncScreen> {
   List<Map<String, dynamic>> get _shops =>
       [for (final s in (_cat['shops'] as List?) ?? const []) if (s is Map) s.cast<String, dynamic>()];
 
-  Map<String, dynamic> get _storeMap => ((_cfg?['storeMap'] as Map?) ?? const {}).cast<String, dynamic>();
+  /// {odooShopId (as String): companyId | "all"}; a shop is synced if it has a value.
+  Map<String, dynamic> get _shopMap => ((_cfg?['shops'] as Map?) ?? const {}).cast<String, dynamic>();
+
+  static bool _isDisplayStore(String name) => name.trim().toLowerCase() == 'display store';
 
   Future<void> _update(Map<String, dynamic> data) async {
     try {
@@ -75,8 +78,9 @@ class _OdooSyncScreenState extends State<OdooSyncScreen> {
         builder: (ctx) => AlertDialog(
           title: const Text('Start syncing POS sales?'),
           content: const Text(
-            'From now on, every paid sale at a linked Odoo shop will reduce stock in the matching app store, '
-            'and refunds will add it back. Sales made before now are not counted.',
+            'From now on, every paid sale at a synced Odoo shop will reduce stock in the “Display Store” '
+            'of the product’s company, and refunds will add it back. Other stores are never changed. '
+            'Sales made before now are not counted.',
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
@@ -99,7 +103,8 @@ class _OdooSyncScreenState extends State<OdooSyncScreen> {
         builder: (ctx) => AlertDialog(
           title: const Text('Send app stock to Odoo?'),
           content: const Text(
-            'Odoo stock in each linked shop will be set to match the app (inventory adjustments in Odoo). '
+            'Odoo stock in each synced shop will be set to match the app’s Display Store stock '
+            '(inventory adjustments in Odoo). '
             'The app is the master: if the two differ, Odoo is corrected.\n\n'
             'Tip: run the sync with this OFF for a day first, and check the stock audit shows POS sales correctly.',
           ),
@@ -212,14 +217,14 @@ class _OdooSyncScreenState extends State<OdooSyncScreen> {
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       title: const Text('Sync POS sales into the app'),
-                      subtitle: const Text('Sales reduce stock, refunds add it back (logged in the stock audit)'),
+                      subtitle: const Text('Sales reduce Display Store stock, refunds add it back (stock audit)'),
                       value: enabled,
                       onChanged: _setEnabled,
                     ),
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       title: const Text('Send app stock to Odoo'),
-                      subtitle: const Text('Keeps Odoo stock equal to the app for linked stores'),
+                      subtitle: const Text('Keeps Odoo stock equal to the Display Store stock'),
                       value: push,
                       onChanged: enabled ? _setPush : null,
                     ),
@@ -230,41 +235,82 @@ class _OdooSyncScreenState extends State<OdooSyncScreen> {
                             style: TextStyle(color: scheme.onSurfaceVariant)),
                       ),
 
-                    // ---- Store links ----
-                    SectionTitle('Link stores to Odoo shops (${_storeMap.values.where((v) => v != null).length} linked)'),
+                    // ---- Display Stores ----
+                    const SectionTitle('Display Stores'),
+                    Text(
+                      'Odoo sales only take stock from the store named “Display Store” in each company.',
+                      style: TextStyle(color: scheme.onSurfaceVariant),
+                    ),
+                    const SizedBox(height: 6),
+                    for (final entry in _companyNames.entries)
+                      Builder(builder: (context) {
+                        final has = _stores.any((st) => st.companyId == entry.key && _isDisplayStore(st.name));
+                        return ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(has ? Icons.check_circle : Icons.error_outline,
+                              color: has ? Colors.green.shade700 : scheme.error),
+                          title: Text(entry.value),
+                          subtitle: Text(has
+                              ? 'Has a Display Store'
+                              : 'No store named “Display Store”: its Odoo sales will show as unmatched'),
+                        );
+                      }),
+
+                    // ---- Odoo shops ----
+                    SectionTitle('Odoo shops to sync (${_shopMap.values.where((v) => v != null).length})'),
                     if (_shops.isEmpty)
                       Text('No Odoo shops found yet. They appear here after the first successful sync run.',
                           style: TextStyle(color: scheme.onSurfaceVariant))
                     else
-                      for (final s in _stores)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: InputDecorator(
-                            decoration: InputDecoration(
-                              labelText: '${s.name} · ${_companyNames[s.companyId] ?? ''}',
-                              isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                            ),
-                            child: DropdownButtonHideUnderline(
-                              child: DropdownButton<int?>(
-                                isExpanded: true,
-                                value: _shops.any((sh) => sh['id'] == _storeMap[s.id]) ? _storeMap[s.id] as int? : null,
-                                items: [
-                                  const DropdownMenuItem<int?>(value: null, child: Text('Not linked')),
-                                  for (final sh in _shops)
-                                    DropdownMenuItem<int?>(
-                                      value: sh['id'] as int?,
-                                      child: Text(
-                                        '${sh['name']}${(sh['locationName'] ?? '') != '' ? '  (${sh['locationName']})' : ''}',
-                                        overflow: TextOverflow.ellipsis,
+                      for (final sh in _shops)
+                        Builder(builder: (context) {
+                          final key = '${sh['id']}';
+                          final value = _shopMap[key] as String?;
+                          return Card(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  SwitchListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    title: Text('${sh['name']}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                                    subtitle: Text((sh['locationName'] ?? '') == ''
+                                        ? 'Odoo shop'
+                                        : 'Stock location: ${sh['locationName']}'),
+                                    value: value != null,
+                                    onChanged: (on) => _update({'shops': {..._shopMap, key: on ? 'all' : null}}),
+                                  ),
+                                  if (value != null)
+                                    InputDecorator(
+                                      decoration: const InputDecoration(
+                                        labelText: 'Sells products of',
+                                        isDense: true,
+                                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                      ),
+                                      child: DropdownButtonHideUnderline(
+                                        child: DropdownButton<String>(
+                                          isExpanded: true,
+                                          value: value == 'all' || _companyNames.containsKey(value) ? value : 'all',
+                                          items: [
+                                            const DropdownMenuItem(
+                                              value: 'all',
+                                              child: Text('All companies (matched by barcode)'),
+                                            ),
+                                            for (final c in _companyNames.entries)
+                                              DropdownMenuItem(value: c.key, child: Text('Only ${c.value}')),
+                                          ],
+                                          onChanged: (v) => _update({'shops': {..._shopMap, key: v ?? 'all'}}),
+                                        ),
                                       ),
                                     ),
                                 ],
-                                onChanged: (v) => _update({'storeMap': {..._storeMap, s.id: v}}),
                               ),
                             ),
-                          ),
-                        ),
+                          );
+                        }),
 
                     // ---- Unmatched sales ----
                     SectionTitle('Unmatched POS sales (${_pending.length})'),
@@ -273,8 +319,8 @@ class _OdooSyncScreenState extends State<OdooSyncScreen> {
                           style: TextStyle(color: scheme.onSurfaceVariant))
                     else ...[
                       Text(
-                        'These Odoo sales have a barcode that isn’t in the linked app store. Give the app product the '
-                        'same barcode/SKU (or add it) and they’ll be applied automatically on the next run.',
+                        'These Odoo sales couldn’t be matched to a Display Store product. Fix the reason shown (e.g. give '
+                        'the Display Store product the same barcode/SKU) and they’re applied automatically on the next run.',
                         style: TextStyle(color: scheme.onSurfaceVariant),
                       ),
                       const SizedBox(height: 8),
@@ -286,8 +332,8 @@ class _OdooSyncScreenState extends State<OdooSyncScreen> {
                             subtitle: Text(
                               'Barcode ${(p.data()['barcode'] as String?)?.isNotEmpty == true ? p.data()['barcode'] : (p.data()['code'] ?? '—')}'
                               ' · ${(p.data()['qty'] ?? 0) > 0 ? 'sold' : 'refunded'} ${((p.data()['qty'] ?? 0) as num).abs()}'
-                              ' · ${_stores.where((s) => s.id == p.data()['storeId']).firstOrNull?.name ?? ''}'
-                              ' · ${p.data()['order'] ?? ''}',
+                              ' · ${p.data()['order'] ?? ''}'
+                              '${(p.data()['reason'] as String?)?.isNotEmpty == true ? '\n${p.data()['reason']}' : ''}',
                             ),
                             trailing: IconButton(
                               tooltip: 'Ignore this sale',

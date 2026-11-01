@@ -9,8 +9,12 @@ Runs every few minutes (GitHub Actions). The app (Firestore) is the MASTER stock
   2. App -> Odoo:       each linked store's stock is copied to its Odoo stock location
                         (inventory adjustment) whenever the numbers differ.
 
+Only the store named "Display Store" in each company is ever changed by Odoo sales,
+and only Display Store stock is sent to Odoo. A sale line's barcode decides the company.
+
 Configuration lives in Firestore (set from the app: Profile -> Odoo sync):
-  odooSync/config   { enabled, pushEnabled, startFrom, storeMap: { appStoreId: odooPosConfigId } }
+  odooSync/config   { enabled, pushEnabled, startFrom,
+                      shops: { odooPosConfigId: companyId | "all" } }   # which Odoo tills are synced
   odooSync/catalog  written here: Odoo shops (POS configs) with their stock locations
   odooSync/state    written here: last run, counts, last error
   odooPending/{id}  POS lines that couldn't be matched yet (retried every run)
@@ -116,6 +120,27 @@ def stock_after_sale(current: int, sold: int) -> tuple[int, bool]:
     return new, False
 
 
+DISPLAY_STORE = "display store"
+
+
+def is_display_store(name: str | None) -> bool:
+    return norm(name) == DISPLAY_STORE
+
+
+def choose_target(candidates: list[dict], company: str | None):
+    """Pick the Display Store product a POS line should come from.
+    candidates: [{"ref":..., "companyId":...}] (products with that barcode in Display Stores).
+    company: the company linked to the Odoo shop, or None/"all".
+    Returns (candidate or None, reason)."""
+    if company and company != "all":
+        candidates = [c for c in candidates if c["companyId"] == company]
+    if len(candidates) == 1:
+        return candidates[0], ""
+    if not candidates:
+        return None, "not found in any Display Store"
+    return None, "barcode is in several companies' Display Stores – link this Odoo shop to one company"
+
+
 def plan_push(app_qty: dict, odoo_qty: dict) -> dict:
     """Which Odoo products need their stock set, and to what. app_qty / odoo_qty: {odoo_product_id: qty}."""
     return {pid: q for pid, q in app_qty.items() if round(float(odoo_qty.get(pid, 0))) != q}
@@ -157,24 +182,29 @@ class Sync:
             )
         return self._place_cache[key]
 
-    def find_product(self, store_id: str, barcodes: list[str]):
-        """App product in this store whose SKU equals one of the Odoo codes."""
+    def display_stores(self) -> dict:
+        """{storeId: companyId} for every store named "Display Store"."""
+        out = {}
+        for st in self.db.collection("stores").stream():
+            d = st.to_dict() or {}
+            if is_display_store(d.get("name")):
+                out[st.id] = d.get("companyId", "")
+        return out
+
+    def find_candidates(self, codes: list[str], display: dict) -> list[dict]:
+        """Products whose SKU equals one of the Odoo codes, in Display Stores only."""
         from google.cloud.firestore_v1.base_query import FieldFilter
 
-        for code in barcodes:
+        found = {}
+        for code in codes:
             if not code:
                 continue
             for variant in {code, code.strip(), code.strip().upper()}:
-                q = (
-                    self.db.collection("products")
-                    .where(filter=FieldFilter("storeId", "==", store_id))
-                    .where(filter=FieldFilter("sku", "==", variant))
-                    .limit(1)
-                    .get()
-                )
-                if q:
-                    return q[0].reference
-        return None
+                for snap in self.db.collection("products").where(filter=FieldFilter("sku", "==", variant)).limit(50).get():
+                    d = snap.to_dict() or {}
+                    if d.get("storeId") in display:
+                        found[snap.id] = {"ref": snap.reference, "companyId": d.get("companyId", "")}
+        return list(found.values())
 
     # ---- 1. Odoo POS -> app ----
     def apply_line(self, line_key: str, prod_ref, sold: int, order_name: str, product_name: str) -> bool:
@@ -225,12 +255,9 @@ class Sync:
 
         return run(self.db.transaction())
 
-    def pull_sales(self, config: dict, shops: dict):
-        store_by_shop = {}
-        for store_id, shop_id in (config.get("storeMap") or {}).items():
-            if shop_id:
-                store_by_shop[int(shop_id)] = store_id
-        if not store_by_shop:
+    def pull_sales(self, config: dict, shops: dict, display: dict):
+        shop_company = {int(k): v for k, v in (config.get("shops") or {}).items() if v}
+        if not shop_company or not display:
             return
 
         state = self.db.collection("odooSync").document("state").get().to_dict() or {}
@@ -242,7 +269,7 @@ class Sync:
         orders = self.odoo.search_read(
             "pos.order",
             [("state", "in", ["paid", "done", "invoiced"]), ("write_date", ">=", odoo_time(since)),
-             ("config_id", "in", list(store_by_shop.keys()))],
+             ("config_id", "in", list(shop_company.keys()))],
             ["id", "name", "config_id"],
             order="id asc",
         )
@@ -253,55 +280,71 @@ class Sync:
         product_ids = list({m2o_id(l["product_id"]) for l in lines if m2o_id(l["product_id"])})
         products = {p["id"]: p for p in self.odoo.kw("product.product", "read", [product_ids], {"fields": ["barcode", "default_code", "display_name"]})} if product_ids else {}
 
-        work = []  # (line_key, store_id, odoo_product_id, qty, order_name)
+        work = []  # (line_key, shopId, odoo_product_id, qty, order_name)
         for (order_id, pid), qty in group_lines(lines).items():
             o = order_info.get(order_id)
             if not o or not pid or round(qty) == 0:
                 continue
-            store_id = store_by_shop.get(m2o_id(o["config_id"]))
-            if store_id:
-                work.append((f"{order_id}_{pid}", store_id, pid, int(round(qty)), o["name"]))
+            work.append((f"{order_id}_{pid}", m2o_id(o["config_id"]), pid, int(round(qty)), o["name"]))
 
         # Earlier unmatched lines are retried every run.
+        keys = {w[0] for w in work}
         for p in self.db.collection("odooPending").stream():
             d = p.to_dict() or {}
-            if not any(w[0] == p.id for w in work):
-                work.append((p.id, d.get("storeId"), d.get("odooProductId"), int(d.get("qty") or 0), d.get("order", "")))
-                pid = d.get("odooProductId")
-                if pid and pid not in products:
-                    products[pid] = {"barcode": d.get("barcode"), "default_code": d.get("code"), "display_name": d.get("name", "")}
+            if p.id in keys:
+                continue
+            pid = d.get("odooProductId")
+            work.append((p.id, d.get("shopId"), pid, int(d.get("qty") or 0), d.get("order", "")))
+            if pid and pid not in products:
+                products[pid] = {"barcode": d.get("barcode"), "default_code": d.get("code"), "display_name": d.get("name", "")}
 
-        for line_key, store_id, pid, qty, order_name in work:
-            if not store_id or not qty:
+        for line_key, shop_id, pid, qty, order_name in work:
+            if not qty:
                 continue
             prod = products.get(pid, {})
-            ref = self.find_product(store_id, [prod.get("barcode") or "", prod.get("default_code") or ""])
-            if ref is None:
+            candidates = self.find_candidates([prod.get("barcode") or "", prod.get("default_code") or ""], display)
+            target, reason = choose_target(candidates, shop_company.get(shop_id))
+            if target is None:
                 self.db.collection("odooPending").document(line_key).set({
-                    "storeId": store_id, "odooProductId": pid, "qty": qty, "order": order_name,
+                    "shopId": shop_id, "odooProductId": pid, "qty": qty, "order": order_name,
                     "barcode": prod.get("barcode") or "", "code": prod.get("default_code") or "",
-                    "name": prod.get("display_name", ""), "updatedAt": self.fs.SERVER_TIMESTAMP,
+                    "name": prod.get("display_name", ""), "reason": reason,
+                    "updatedAt": self.fs.SERVER_TIMESTAMP,
                 }, merge=True)
                 self.stats["unmatched"] += 1
                 continue
-            if self.apply_line(line_key, ref, qty, order_name, prod.get("display_name", "")):
+            if self.apply_line(line_key, target["ref"], qty, order_name, prod.get("display_name", "")):
                 self.stats["lines_applied"] += 1
 
         self.db.collection("odooSync").document("state").set({"lastPullAt": self.now}, merge=True)
 
     # ---- 2. app -> Odoo ----
-    def push_stock(self, config: dict, shops: dict):
+    def push_stock(self, config: dict, shops: dict, display: dict):
+        """Set each synced Odoo shop's stock to the Display Store stock of its company
+        (or of all companies, summed per barcode, if the shop is linked to "all")."""
         from google.cloud.firestore_v1.base_query import FieldFilter
 
-        for store_id, shop_id in (config.get("storeMap") or {}).items():
-            shop = shops.get(int(shop_id)) if shop_id else None
+        # Display Store stock per company: {companyId: {code: qty}}
+        per_company: dict = defaultdict(lambda: defaultdict(int))
+        for store_id, company_id in display.items():
+            for snap in self.db.collection("products").where(filter=FieldFilter("storeId", "==", store_id)).stream():
+                d = snap.to_dict() or {}
+                code = norm(d.get("sku"))
+                if code:
+                    per_company[company_id][code] += int(d.get("quantity") or 0)
+
+        for shop_key, company in (config.get("shops") or {}).items():
+            if not company:
+                continue
+            shop = shops.get(int(shop_key))
             loc = shop and shop.get("locationId")
             if not loc:
                 continue
-            app_products = [
-                p.to_dict() for p in self.db.collection("products").where(filter=FieldFilter("storeId", "==", store_id)).stream()
-            ]
-            by_code = {norm(p.get("sku")): int(p.get("quantity") or 0) for p in app_products if norm(p.get("sku"))}
+            by_code: dict = defaultdict(int)
+            for cid, codes in per_company.items():
+                if company == "all" or cid == company:
+                    for code, q in codes.items():
+                        by_code[code] += q
             if not by_code:
                 continue
 
@@ -309,7 +352,7 @@ class Sync:
             odoo_products = []
             for i in range(0, len(codes), 200):
                 chunk = codes[i:i + 200]
-                variants = list({c for c in chunk} | {c.upper() for c in chunk})
+                variants = list(set(chunk) | {c.upper() for c in chunk})
                 odoo_products += self.odoo.search_read(
                     "product.product",
                     ["|", ("barcode", "in", variants), ("default_code", "in", variants)],
@@ -365,9 +408,11 @@ def main() -> int:
         shops = sync.write_catalog()
 
         if config.get("enabled"):
-            sync.pull_sales(config, shops)
+            display = sync.display_stores()
+            sync.stats["display_stores"] = len(display)
+            sync.pull_sales(config, shops, display)
             if config.get("pushEnabled"):
-                sync.push_stock(config, shops)
+                sync.push_stock(config, shops, display)
 
         state_ref.set({
             "lastRunAt": firestore.SERVER_TIMESTAMP,

@@ -224,8 +224,8 @@ The app now requires signing in with a **username and password**. Each account a
 ## Odoo sync (POS ⇄ app stock)
 
 The **app is the master stock**. A small sync program, [`sync/odoo_sync.py`](sync/odoo_sync.py), runs **every ~5 minutes on GitHub Actions**, which is free. No Firebase Blaze plan is needed.
-- **Odoo → app:** every paid POS sale at a linked Odoo shop **reduces stock** in the matching app store, and **refunds add it back**. Each line is applied exactly once and logged in the **Stock audit** as "Odoo POS". Sales whose barcode isn't found wait in **Unmatched POS sales** and are applied automatically once the barcode exists in the app.
-- **App → Odoo** (optional switch): each linked store's stock is copied to its Odoo shop's stock location as an inventory adjustment, so the till shows the same numbers.
+- **Only the store named "Display Store" in each company is affected.** Every paid POS sale **reduces that company's Display Store stock** (the company is found from the product's barcode), and **refunds add it back**. Warehouses and other stores are never touched by Odoo. Each line is applied exactly once and logged in the **Stock audit** as "Odoo POS". Sales whose barcode isn't found wait in **Unmatched POS sales** and are applied automatically once the barcode exists in the app.
+- **App → Odoo** (optional switch): the **Display Store** stock is copied to each synced Odoo shop's stock location as an inventory adjustment, so the till shows the same numbers.
 - Products are matched by **barcode**: the app's SKU must equal the product **Barcode** (or Internal Reference) in Odoo.
 
 ### One-time setup
@@ -253,7 +253,7 @@ The **app is the master stock**. A small sync program, [`sync/odoo_sync.py`](syn
 
 **5. In the app** (admin): **Profile → Odoo sync**
 1. The status should say **Sync is running**, and your **Odoo shops** appear in the list.
-2. **Link each store** to its Odoo shop.
+2. Check every company has a store named exactly **Display Store**. Then, under **Odoo shops to sync**, switch on your till(s). Choose **All companies** if one till sells every company's products, or pick a company if a till only sells that company's products.
 3. Turn on **Sync POS sales into the app**. Only sales from that moment on are counted.
 4. After checking for a day that POS sales show correctly in the **Stock audit**, turn on **Send app stock to Odoo**.
 
