@@ -29,6 +29,11 @@ assert s.choose_target([A, B], "nivea") == (B, "")
 assert s.choose_target([A, B], "all")[0] is None and "several" in s.choose_target([A, B], "all")[1]
 assert s.choose_target([], "all") == (None, "not found in any Display Store")
 assert s.choose_target([A], "nivea")[0] is None
+assert {"0123456789012", "123456789012"} <= s.code_variants("123456789012")
+assert "123456789012" in s.code_variants("0123456789012")
+assert s.code_key("0123456789012") == s.code_key("123456789012")
+assert s.code_variants("AC-001") == {"AC-001"}
+assert s.code_variants("") == set()
 print("helpers OK")
 
 # ---- JSON-RPC client against a fake Odoo ----

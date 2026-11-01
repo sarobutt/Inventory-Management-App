@@ -94,6 +94,28 @@ def norm(code: str | None) -> str:
     return (code or "").strip().lower()
 
 
+def code_variants(code: str | None) -> set[str]:
+    """Spellings of the same barcode. UPC-A (12 digits) is often read as EAN-13 with a
+    leading 0, so for numeric codes we also try with/without leading zeros."""
+    c = (code or "").strip()
+    if not c:
+        return set()
+    out = {c, c.upper()}
+    if c.isdigit():
+        bare = c.lstrip("0") or "0"
+        out |= {bare}
+        for length in (8, 12, 13, 14):
+            if len(bare) <= length:
+                out.add(bare.zfill(length))
+    return out
+
+
+def code_key(code: str | None) -> str:
+    """One comparable key per barcode (numeric codes without leading zeros)."""
+    c = norm(code)
+    return (c.lstrip("0") or "0") if c.isdigit() else c
+
+
 def m2o_id(v):
     """Odoo many2one values come as [id, name] or False."""
     return v[0] if isinstance(v, (list, tuple)) and v else None
@@ -199,7 +221,7 @@ class Sync:
         for code in codes:
             if not code:
                 continue
-            for variant in {code, code.strip(), code.strip().upper()}:
+            for variant in code_variants(code):
                 for snap in self.db.collection("products").where(filter=FieldFilter("sku", "==", variant)).limit(50).get():
                     d = snap.to_dict() or {}
                     if d.get("storeId") in display:
@@ -329,7 +351,7 @@ class Sync:
         for store_id, company_id in display.items():
             for snap in self.db.collection("products").where(filter=FieldFilter("storeId", "==", store_id)).stream():
                 d = snap.to_dict() or {}
-                code = norm(d.get("sku"))
+                code = code_key(d.get("sku"))
                 if code:
                     per_company[company_id][code] += int(d.get("quantity") or 0)
 
@@ -350,9 +372,9 @@ class Sync:
 
             codes = list(by_code)
             odoo_products = []
-            for i in range(0, len(codes), 200):
-                chunk = codes[i:i + 200]
-                variants = list(set(chunk) | {c.upper() for c in chunk})
+            for i in range(0, len(codes), 100):
+                chunk = codes[i:i + 100]
+                variants = list({v for c in chunk for v in code_variants(c)})
                 odoo_products += self.odoo.search_read(
                     "product.product",
                     ["|", ("barcode", "in", variants), ("default_code", "in", variants)],
@@ -360,7 +382,7 @@ class Sync:
                 )
             app_qty = {}
             for op in odoo_products:
-                code = norm(op.get("barcode")) if norm(op.get("barcode")) in by_code else norm(op.get("default_code"))
+                code = code_key(op.get("barcode")) if code_key(op.get("barcode")) in by_code else code_key(op.get("default_code"))
                 if code in by_code:
                     app_qty[op["id"]] = by_code[code]
             if not app_qty:
