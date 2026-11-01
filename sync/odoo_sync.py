@@ -406,6 +406,26 @@ class Sync:
             out[cid] = children[norm(name)]
         return out
 
+    def diagnose_till(self):
+        """Print why products might not show in the till (counts and settings only)."""
+        try:
+            sellable = self.odoo.search_read("product.product", [("available_in_pos", "=", True)], ["company_id", "pos_categ_ids"] if "pos_categ_ids" in self.odoo.kw("product.product", "fields_get", [], {"attributes": ["type"]}) else ["company_id"])
+            by_company = defaultdict(int)
+            for p in sellable:
+                by_company[m2o_name(p.get("company_id")) or "shared (all companies)"] += 1
+            print(f"check: {len(sellable)} products are 'Available in POS'; by Odoo company: {dict(by_company)}")
+            cfg_fields = self.odoo.kw("pos.config", "fields_get", [], {"attributes": ["type"]})
+            want = [f for f in ["name", "company_id", "limit_categories", "iface_available_categ_ids", "current_session_state",
+                                "limited_products_loading", "active"] if f in cfg_fields]
+            for c in self.odoo.search_read("pos.config", [], want):
+                info = {k: (m2o_name(v) if isinstance(v, list) and k == "company_id" else (len(v) if isinstance(v, list) else v))
+                        for k, v in c.items() if k != "id"}
+                print(f"check: till {info}")
+            companies = self.odoo.search_read("res.company", [], ["name"])
+            print(f"check: Odoo companies: {[c['name'] for c in companies]}")
+        except OdooError as e:
+            print(f"check: could not read till settings: {e}")
+
     # ---- 0. app products -> Odoo products ----
     def push_products(self, display: dict):
         """Create/update an Odoo product for every Display Store product (one per barcode).
@@ -651,6 +671,7 @@ def main() -> int:
         odoo = Odoo(url, odoo_db, os.environ["ODOO_LOGIN"].strip(), os.environ["ODOO_API_KEY"].strip())
         sync = Sync(db, odoo, firestore)
         shops = sync.write_catalog()
+        sync.diagnose_till()
 
         if config.get("enabled"):
             display = sync.display_stores()
