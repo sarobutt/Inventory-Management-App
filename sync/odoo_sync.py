@@ -212,6 +212,10 @@ class Sync:
         self.fs = firestore_mod
         self.now = dt.datetime.now(dt.timezone.utc)
         self.stats = defaultdict(int)
+        import time
+
+        # Leave room under the GitHub job limit; unfinished work continues on the next run.
+        self.deadline = time.monotonic() + float(os.environ.get("SYNC_TIME_BUDGET_SECONDS", "720"))
         self._place_cache: dict = {}
 
     # ---- catalog of Odoo shops (shown in the app for linking) ----
@@ -377,8 +381,18 @@ class Sync:
     # ---- 2. app -> Odoo ----
     # ---- 0. app products -> Odoo products ----
     def push_products(self, display: dict):
-        """Create/update an Odoo product for every Display Store product (one per barcode)."""
+        """Create/update an Odoo product for every Display Store product (one per barcode).
+        Creates in batches and stops before the time budget; the rest continues next run."""
+        import time
+
         from google.cloud.firestore_v1.base_query import FieldFilter
+
+        # Cost prices, read once (admin-only collection).
+        costs = {}
+        for pr in self.db.collection("productPrices").stream():
+            c = (pr.to_dict() or {}).get("cost")
+            if c is not None:
+                costs[pr.id] = c
 
         # One app product per barcode (first Display Store wins for name/price).
         wanted: dict = {}
@@ -387,15 +401,9 @@ class Sync:
                 d = snap.to_dict() or {}
                 sku = (d.get("sku") or "").strip()
                 key = code_key(sku)
-                if not key or key in wanted:
-                    continue
-                cost = None
-                try:
-                    pr = self.db.collection("productPrices").document(snap.id).get()
-                    cost = (pr.to_dict() or {}).get("cost") if pr.exists else None
-                except Exception:  # noqa: BLE001 - cost is optional
-                    pass
-                wanted[key] = product_payload(d.get("name", ""), sku, d.get("retailPrice"), cost)
+                if key and key not in wanted:
+                    wanted[key] = product_payload(d.get("name", ""), sku, d.get("retailPrice"), costs.get(snap.id))
+        self.stats["app_products"] = len(wanted)
         if not wanted:
             return
 
@@ -410,31 +418,54 @@ class Sync:
 
         keys = list(wanted)
         existing: dict = {}
-        for i in range(0, len(keys), 100):
-            variants = list({v for k in keys[i:i + 100] for v in code_variants(k)})
+        for i in range(0, len(keys), 200):
+            variants = list({v for k in keys[i:i + 200] for v in code_variants(k)})
             for op in self.odoo.search_read(
                 "product.product",
                 [("barcode", "in", variants)],
-                ["id", "barcode", "name", "list_price", "standard_price", "available_in_pos", "sale_ok", "product_tmpl_id"],
+                ["id", "barcode", "name", "list_price", "standard_price", "available_in_pos", "sale_ok"],
                 context={"active_test": False},
             ):
                 existing[code_key(op.get("barcode"))] = op
+        self.stats["odoo_products_existing"] = len(existing)
 
-        for key, vals in wanted.items():
+        # ---- create missing products, 100 per call ----
+        to_create = [{**vals, **storable} for key, vals in wanted.items() if key not in existing]
+        print(f"products: {len(wanted)} in Display Stores, {len(existing)} already in Odoo, {len(to_create)} to create")
+        for i in range(0, len(to_create), 100):
+            if time.monotonic() > self.deadline:
+                self.stats["odoo_products_left_for_next_run"] = len(to_create) - i
+                print(f"products: time budget reached, {len(to_create) - i} will be created next run")
+                return
+            batch = to_create[i:i + 100]
             try:
-                op = existing.get(key)
-                if op is None:
-                    vals = {**vals, **storable}
-                    self.odoo.kw("product.template", "create", [vals])
-                    self.stats["odoo_products_created"] += 1
-                else:
-                    vals = {**vals, "barcode": op.get("barcode")}  # keep Odoo's spelling of the barcode
-                    changes = product_changes(op, vals)
-                    if changes:
-                        self.odoo.kw("product.product", "write", [[op["id"]], changes])
-                        self.stats["odoo_products_updated"] += 1
+                self.odoo.kw("product.template", "create", [batch])
+                self.stats["odoo_products_created"] += len(batch)
             except OdooError:
-                self.stats["odoo_product_errors"] += 1
+                # One bad product (e.g. duplicate barcode) fails the batch; retry one by one.
+                for vals in batch:
+                    try:
+                        self.odoo.kw("product.template", "create", [vals])
+                        self.stats["odoo_products_created"] += 1
+                    except OdooError:
+                        self.stats["odoo_product_errors"] += 1
+            print(f"products: created {self.stats['odoo_products_created']}/{len(to_create)}")
+
+        # ---- update changed names/prices ----
+        for key, vals in wanted.items():
+            op = existing.get(key)
+            if op is None:
+                continue
+            if time.monotonic() > self.deadline:
+                print("products: time budget reached during updates, continuing next run")
+                return
+            changes = product_changes(op, {**vals, "barcode": op.get("barcode")})
+            if changes:
+                try:
+                    self.odoo.kw("product.product", "write", [[op["id"]], changes])
+                    self.stats["odoo_products_updated"] += 1
+                except OdooError:
+                    self.stats["odoo_product_errors"] += 1
 
     def push_stock(self, config: dict, shops: dict, display: dict):
         """Set each synced Odoo shop's stock to the Display Store stock of its company
@@ -494,7 +525,12 @@ class Sync:
                 quant_id.setdefault(pid, q["id"])
 
             ctx = {"context": {"inventory_mode": True}}
+            import time
+
             for pid, target in plan_push(app_qty, odoo_qty).items():
+                if time.monotonic() > self.deadline:
+                    print("stock: time budget reached, continuing next run")
+                    return
                 try:
                     if pid in quant_id:
                         qid = quant_id[pid]
