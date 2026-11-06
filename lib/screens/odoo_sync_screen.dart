@@ -146,7 +146,7 @@ class _OdooSyncScreenState extends State<OdooSyncScreen> {
     final scheme = Theme.of(context).colorScheme;
     final cfg = _cfg;
     final enabled = cfg?['enabled'] == true;
-    final push = cfg?['pushEnabled'] == true;
+    final push = cfg?['pushEnabled'] != false;
     final lastError = (_st['lastError'] as String?) ?? '';
     final stats = ((_st['lastStats'] as Map?) ?? const {}).cast<String, dynamic>();
     final lastRun = _st['lastRunAt'];

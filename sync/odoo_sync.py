@@ -227,6 +227,7 @@ class AppCache:
         self.products: dict = {}    # productId -> data (only products in display stores)
         self.costs: dict = {}       # productId -> cost
         self.loaded_at: dt.datetime | None = None
+        self.retry_keys: set = set()  # barcodes to push again next pass
         self.checked_at: dt.datetime | None = None
 
     @property
@@ -400,6 +401,7 @@ class Sync:
             tx.update(prod_ref, {"quantity": after, "updatedAt": fs.SERVER_TIMESTAMP})
             if sync.cache and prod_ref.id in sync.cache.products:
                 sync.cache.products[prod_ref.id]["quantity"] = after  # keep the cache current
+                sync.cache.retry_keys.add(code_key(d.get("sku")))
             note = f"Odoo POS {'refund' if sold < 0 else 'sale'} {order_name}"
             if short:
                 note += f" (sold {sold}, only {before} in stock in the app)"
@@ -516,6 +518,24 @@ class Sync:
             out[cid] = children[norm(name)]
         return out
 
+    def diagnose_orders(self, config: dict, shops: dict, last_pull):
+        """Counts only: recent till orders by till and state, and which tills the sync reads."""
+        try:
+            since = self.now - dt.timedelta(days=2)
+            recent = self.odoo.search_read("pos.order", [("create_date", ">=", odoo_time(since))], ["state", "config_id"], limit=500)
+            by = defaultdict(int)
+            for o in recent:
+                by[f"till {m2o_id(o.get('config_id'))} {o.get('state')}"] += 1
+            linked = {k: ("all brands" if v == "all" else "one brand") for k, v in (config.get("shops") or {}).items() if v}
+            start = config.get("startFrom")
+            print(f"orders check: last 2 days {dict(by) or 'no till orders at all'}; tills in Odoo {sorted(shops)}; "
+                  f"tills ticked in the app {linked or 'NONE - tick your till in Profile > Odoo sync'}; "
+                  f"counting sales from {odoo_time(start) if isinstance(start, dt.datetime) else 'not set'}; "
+                  f"last checked {odoo_time(last_pull) if isinstance(last_pull, dt.datetime) else 'never'}; "
+                  f"send stock to Odoo {'ON' if config.get('pushEnabled', True) else 'OFF'}", flush=True)
+        except OdooError as e:
+            print(f"orders check failed: {e}", flush=True)
+
     def diagnose_till(self):
         """Print why products might not show in the till (counts and settings only)."""
         try:
@@ -553,6 +573,14 @@ class Sync:
             if key and key not in wanted:
                 wanted[key] = product_payload(d.get("name", ""), sku, d.get("retailPrice"), self.cache.costs.get(pid))
                 company_of[key] = display[d.get("storeId")]
+        # Products with no Display Store stock left are taken off the till until restocked.
+        stock_of: dict = defaultdict(int)
+        for d in self.cache.products.values():
+            if d.get("storeId") in display:
+                stock_of[code_key(d.get("sku"))] += int(d.get("quantity") or 0)
+        for key, vals in wanted.items():
+            vals["available_in_pos"] = stock_of.get(key, 0) > 0
+        self.stats["out_of_stock_hidden"] = sum(1 for v in wanted.values() if not v["available_in_pos"])
         all_keys = set(wanted)
         if only_keys is not None:
             wanted = {k: v for k, v in wanted.items() if k in only_keys}
@@ -645,7 +673,17 @@ class Sync:
                     self.odoo.kw("product.product", "write", [[op["id"]], changes])
                     self.stats["odoo_products_updated"] += 1
                 except OdooError:
-                    self.stats["odoo_product_errors"] += 1
+                    # Odoo may refuse to take a product off the till while a session is open:
+                    # save the other changes now and try the till visibility again next pass.
+                    rest = {k: v for k, v in changes.items() if k != "available_in_pos"}
+                    try:
+                        if rest:
+                            self.odoo.kw("product.product", "write", [[op["id"]], rest])
+                        self.stats["till_visibility_retry"] += 1
+                        if self.cache:
+                            self.cache.retry_keys.add(key)
+                    except OdooError:
+                        self.stats["odoo_product_errors"] += 1
 
         # Everything else in Odoo is hidden from the till (full passes only).
         if only_keys is None and time.monotonic() <= self.deadline:
@@ -767,6 +805,7 @@ class Runner:
         self.shops: dict | None = None
         self.last_pull: dt.datetime | None = None
         self.first = True
+        self.passes = 0
 
     def login(self) -> Odoo:
         url = os.environ["ODOO_URL"].strip()
@@ -794,6 +833,10 @@ class Runner:
             if self.first:
                 sync.diagnose_till()
 
+            if self.first or self.passes % 30 == 0:  # about once an hour
+                sync.diagnose_orders(config, self.shops, self.last_pull)
+            self.passes += 1
+
             if config.get("enabled"):
                 if full:
                     self.cache.full_load(now)
@@ -802,11 +845,16 @@ class Runner:
                     changed = self.cache.incremental(now)
                 display = self.cache.display
                 sync.stats["display_stores"] = len(display)
-                if config.get("syncProducts", True) and (changed is None or changed):
-                    sync.push_products(display, changed)
+                # 1. Till sales first, so the stock sent back to Odoo already includes them.
                 sync.pull_sales(config, self.shops, display, self.last_pull)
                 self.last_pull = now
-                if config.get("pushEnabled") and (changed is None or changed):
+                if changed is not None:
+                    changed |= self.cache.retry_keys
+                self.cache.retry_keys = set()
+                # 2. Products (name, price, on/off the till when out of stock), 3. stock levels.
+                if config.get("syncProducts", True) and (changed is None or changed):
+                    sync.push_products(display, changed)
+                if config.get("pushEnabled", True) and (changed is None or changed):
                     sync.push_stock(config, self.shops, display, changed)
 
             state_ref.set({
@@ -836,6 +884,32 @@ class Runner:
             return False
 
 
+def newer_code_pushed() -> bool:
+    """True when a newer version of this program is on GitHub: the run then ends early and
+    the workflow starts the next run, which uses the new code. Checked every ~10 minutes."""
+    import subprocess
+    import time
+
+    global _last_code_check
+    sha, repo = os.environ.get("GITHUB_SHA"), os.environ.get("GITHUB_REPOSITORY")
+    branch = os.environ.get("GITHUB_REF_NAME", "main")
+    if not sha or not repo or time.monotonic() - _last_code_check < 600:
+        return False
+    _last_code_check = time.monotonic()
+    try:
+        out = subprocess.run(["git", "ls-remote", f"https://github.com/{repo}.git", f"refs/heads/{branch}"],
+                             capture_output=True, text=True, timeout=30).stdout.split()
+        if out and out[0] != sha:
+            print("newer sync code found on GitHub: restarting with it", flush=True)
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
+_last_code_check = __import__("time").monotonic()
+
+
 def main() -> int:
     """Runs the sync repeatedly: every SYNC_INTERVAL_SECONDS for SYNC_LOOP_MINUTES. The GitHub
     workflow then starts the next run itself."""
@@ -858,7 +932,7 @@ def main() -> int:
         ok = runner.run_once()
         ok_any = ok or ok_any
         failures = 0 if ok else failures + 1
-        if time.monotonic() + interval > end:
+        if time.monotonic() + interval > end or newer_code_pushed():
             break
         # Back off after repeated failures (e.g. quota reached): up to 30 minutes.
         wait = interval if failures < 2 else min(1800.0, interval * (2 ** (failures - 1)))
