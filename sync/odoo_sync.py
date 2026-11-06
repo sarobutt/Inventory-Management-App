@@ -424,7 +424,13 @@ class Sync:
                 "note": note,
                 "createdAt": fs.SERVER_TIMESTAMP,
             })
-            tx.set(marker, {"at": fs.SERVER_TIMESTAMP, "order": order_name, "qty": sold})
+            # Shown in the app under Profile > Odoo sales.
+            tx.set(marker, {
+                "at": fs.SERVER_TIMESTAMP, "order": order_name, "qty": sold,
+                "productId": prod_ref.id, "productName": d.get("name", product_name), "sku": d.get("sku", ""),
+                "storeName": store_name, "companyName": company_name,
+                "before": before, "after": after, "short": short,
+            })
             tx.delete(pending_ref)
             return True
 
@@ -528,6 +534,10 @@ class Sync:
                 by[f"till {m2o_id(o.get('config_id'))} {o.get('state')}"] += 1
             linked = {k: ("all brands" if v == "all" else "one brand") for k, v in (config.get("shops") or {}).items() if v}
             start = config.get("startFrom")
+            self.db.collection("odooSync").document("state").set({"ordersCheck": {
+                "at": self.fs.SERVER_TIMESTAMP, "recentOrders": len(recent),
+                "tillsTicked": len(linked), "pushEnabled": config.get("pushEnabled", True) is not False,
+            }}, merge=True)
             print(f"orders check: last 2 days {dict(by) or 'no till orders at all'}; tills in Odoo {sorted(shops)}; "
                   f"tills ticked in the app {linked or 'NONE - tick your till in Profile > Odoo sync'}; "
                   f"counting sales from {odoo_time(start) if isinstance(start, dt.datetime) else 'not set'}; "
