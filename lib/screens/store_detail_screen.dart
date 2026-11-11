@@ -110,7 +110,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
     final key = code.trim().toLowerCase();
     Product? match;
     for (final p in _latest) {
-      if (p.sku.trim().toLowerCase() == key) {
+      if (sameBarcode(p.sku, key)) {
         match = p;
         break;
       }
@@ -174,7 +174,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
               _latest = all ?? const [];
               final q = _search.trim().toLowerCase();
               final products = (all ?? const <Product>[])
-                  .where((p) => q.isEmpty || p.name.toLowerCase().contains(q) || p.sku.toLowerCase().contains(q))
+                  .where((p) => productMatches(p.name, p.sku, q))
                   .where((p) => !_onlyNeedsOrdering || p.needsOrdering)
                   .toList();
               final needOrdering = (all ?? const <Product>[]).where((p) => p.needsOrdering).length;

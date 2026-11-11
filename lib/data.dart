@@ -5,6 +5,69 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'audit.dart';
 import 'auth.dart';
 
+// ---------------- Barcodes ----------------
+//
+// The same product barcode can be written in different ways:
+//   * leading zeros: a scanner may read 0123456789012 where a spreadsheet saved 123456789012
+//     (UPC-A vs EAN-13, or Excel dropping the leading 0)
+//   * spreadsheet number formats: "8801234567890.0" or "8.80123456789E+12"
+// These helpers treat all of those as the same barcode.
+
+/// Tidies a barcode as typed, scanned or imported (spaces removed, Excel number formats undone).
+String cleanBarcode(String raw) {
+  var s = raw.trim().replaceAll(RegExp(r'\s+'), '');
+  final decimal = RegExp(r'^(\d+)\.0+$').firstMatch(s);
+  if (decimal != null) return decimal.group(1)!;
+  final sci = RegExp(r'^(\d)(?:\.(\d+))?[eE]\+?(\d+)$').firstMatch(s);
+  if (sci != null) {
+    final digits = sci.group(1)! + (sci.group(2) ?? '');
+    final exp = int.parse(sci.group(3)!);
+    final decimals = (sci.group(2) ?? '').length;
+    // Only when no digits were lost (e.g. 8.801234567890E+12); a rounded value stays as it is.
+    if (exp == decimals) s = digits;
+  }
+  return s;
+}
+
+/// Comparison key: numeric barcodes without leading zeros, other codes lower-case.
+String barcodeKey(String raw) {
+  final s = cleanBarcode(raw).toLowerCase();
+  if (RegExp(r'^\d+$').hasMatch(s)) {
+    final t = s.replaceFirst(RegExp(r'^0+'), '');
+    return t.isEmpty ? '0' : t;
+  }
+  return s;
+}
+
+/// True when two barcodes mean the same product.
+bool sameBarcode(String a, String b) {
+  final ka = barcodeKey(a);
+  return ka.isNotEmpty && ka == barcodeKey(b);
+}
+
+/// The spellings a barcode may be stored under (for database lookups; at most 10).
+List<String> barcodeVariants(String raw) {
+  final clean = cleanBarcode(raw);
+  if (clean.isEmpty) return const [];
+  final out = <String>{raw.trim(), clean, clean.toUpperCase(), clean.toLowerCase()};
+  final key = barcodeKey(clean);
+  if (RegExp(r'^\d+$').hasMatch(key)) {
+    out.add(key);
+    for (final len in [8, 12, 13, 14]) {
+      if (key.length < len) out.add(key.padLeft(len, '0'));
+    }
+  }
+  out.removeWhere((s) => s.isEmpty);
+  return out.take(10).toList();
+}
+
+/// Search box match: name or SKU contains the text, or the text is the same barcode.
+bool productMatches(String name, String sku, String query) {
+  final q = query.trim().toLowerCase();
+  if (q.isEmpty) return true;
+  return name.toLowerCase().contains(q) || sku.toLowerCase().contains(q) || sameBarcode(sku, q);
+}
+
 // Data structure
 //   companies/{id}      name, description
 //   stores/{id}         companyId, name, address
@@ -660,15 +723,17 @@ class Db {
 
   /// The product in [storeId] with this exact SKU/barcode, if any (used to prevent duplicates).
   static Future<Product?> findInStoreBySku(String storeId, String sku) async {
-    final clean = sku.trim();
-    if (clean.isEmpty) return null;
-    final snap = await _products.where('storeId', isEqualTo: storeId).where('sku', isEqualTo: clean).limit(1).get();
+    final variants = barcodeVariants(sku);
+    if (variants.isEmpty) return null;
+    final snap = await _products.where('storeId', isEqualTo: storeId).where('sku', whereIn: variants).limit(1).get();
     return snap.docs.isEmpty ? null : Product.fromDoc(snap.docs.first);
   }
 
-  /// Products (in any store) whose SKU/barcode exactly matches [sku].
+  /// Products (in any store) with this SKU/barcode (leading zeros and spreadsheet formats ignored).
   static Future<List<Product>> findBySku(String sku) async {
-    final snap = await _products.where('sku', isEqualTo: sku).limit(20).get();
+    final variants = barcodeVariants(sku);
+    if (variants.isEmpty) return const [];
+    final snap = await _products.where('sku', whereIn: variants).limit(20).get();
     return snap.docs.map(Product.fromDoc).toList();
   }
 }

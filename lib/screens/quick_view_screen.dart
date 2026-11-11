@@ -77,11 +77,11 @@ class _QuickViewScreenState extends State<QuickViewScreen> {
     var matches = <Product>[];
     var exact = false;
     if (products != null && _q.isNotEmpty) {
-      matches = products.where((p) => p.sku.trim().toLowerCase() == _q).toList();
+      matches = products.where((p) => sameBarcode(p.sku, _q)).toList();
       exact = matches.isNotEmpty;
       if (!exact) {
         matches = products
-            .where((p) => p.name.toLowerCase().contains(_q) || p.sku.toLowerCase().contains(_q))
+            .where((p) => productMatches(p.name, p.sku, _q))
             .toList();
       }
     }

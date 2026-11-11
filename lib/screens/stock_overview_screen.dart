@@ -65,7 +65,7 @@ class _StockOverviewScreenState extends State<StockOverviewScreen> {
   List<Product> get _inScope => (_products ?? const <Product>[]).where((p) {
         if (_companyId != null && p.companyId != _companyId) return false;
         if (_storeId != null && p.storeId != _storeId) return false;
-        if (_q.isNotEmpty && !p.name.toLowerCase().contains(_q) && !p.sku.toLowerCase().contains(_q)) return false;
+        if (!productMatches(p.name, p.sku, _q)) return false;
         return true;
       }).toList();
 

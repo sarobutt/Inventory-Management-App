@@ -311,7 +311,7 @@ List<ImportRow> rowsFromGrid(List<List<String>> grid) {
     out.add(ImportRow(
       line: i + 1,
       product: product,
-      sku: cell(r, _Col.sku),
+      sku: cleanBarcode(cell(r, _Col.sku)),
       prices: prices,
       quantity: qty,
       reorderLevel: reorder,
@@ -381,6 +381,7 @@ class ImportPlan {
 }
 
 String _key(String s) => s.trim().toLowerCase();
+String _skuKey(String s) => barcodeKey(s);
 
 /// Works out what the import will do in [storeId] without writing anything.
 /// [storeProducts] are the products currently in that store.
@@ -394,7 +395,7 @@ ImportPlan buildPlan({
   final bySku = <String, Product>{};
   final byName = <String, Product>{};
   for (final p in storeProducts) {
-    if (p.sku.isNotEmpty) bySku.putIfAbsent(_key(p.sku), () => p);
+    if (p.sku.isNotEmpty) bySku.putIfAbsent(_skuKey(p.sku), () => p);
     byName.putIfAbsent(_key(p.name), () => p);
   }
 
@@ -408,10 +409,10 @@ ImportPlan buildPlan({
     }
 
     // Match by SKU first, then by name.
-    final writeKey = row.sku.isNotEmpty ? 'sku:${_key(row.sku)}' : 'name:${_key(row.product)}';
+    final writeKey = row.sku.isNotEmpty ? 'sku:${_skuKey(row.sku)}' : 'name:${_key(row.product)}';
     final pending = writes[writeKey];
     final existing =
-        pending == null ? (row.sku.isNotEmpty ? bySku[_key(row.sku)] : null) ?? byName[_key(row.product)] : null;
+        pending == null ? (row.sku.isNotEmpty ? bySku[_skuKey(row.sku)] : null) ?? byName[_key(row.product)] : null;
 
     if (pending != null) {
       // Same product appears again in the file.

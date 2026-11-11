@@ -774,7 +774,7 @@ class _SourcePickerState extends State<_SourcePicker> {
             final groups = <String, List<Product>>{};
             for (final p in products) {
               if (_storeFilter != null && p.storeId != _storeFilter) continue;
-              if (_q.isNotEmpty && !p.name.toLowerCase().contains(_q) && !p.sku.toLowerCase().contains(_q)) continue;
+              if (!productMatches(p.name, p.sku, _q)) continue;
               groups.putIfAbsent(_key(p), () => []).add(p);
             }
 

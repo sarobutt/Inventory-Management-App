@@ -204,7 +204,7 @@ class _MoveProductsScreenState extends State<MoveProductsScreen> {
       builder: (context, snap) {
         final all = snap.data ?? const <Product>[];
         final shown = all
-            .where((p) => _q.isEmpty || p.name.toLowerCase().contains(_q) || p.sku.toLowerCase().contains(_q))
+            .where((p) => productMatches(p.name, p.sku, _q))
             .toList();
         final allShownSelected = shown.isNotEmpty && shown.every((p) => _selected.contains(p.id));
 
