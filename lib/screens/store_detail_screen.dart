@@ -124,18 +124,27 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
       showMessage(context, 'No product with barcode $code in this store. Ask an admin to add it.');
       return;
     }
-    final add = await showDialog<bool>(
+    final noBarcode = _latest.where((p) => p.sku.trim().isEmpty).length;
+    final choice = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Not in this store'),
-        content: Text('No product with barcode $code here yet. Add it as a new product?'),
+        content: Text('No product with barcode $code here yet.\n\n'
+            'If the product is already in the list without a barcode (e.g. imported from a supplier list), '
+            'link this barcode to it. Otherwise add it as a new product.'
+            '${noBarcode > 0 ? '\n\nProducts here without a barcode: $noBarcode.' : ''}'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Add product')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          OutlinedButton(onPressed: () => Navigator.pop(ctx, 'link'), child: const Text('Link to existing')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, 'add'), child: const Text('Add new')),
         ],
       ),
     );
-    if (add == true && mounted) {
+    if (choice == 'link' && mounted) {
+      await _linkBarcode(code);
+      return;
+    }
+    if (choice == 'add' && mounted) {
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -143,6 +152,23 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
           fullscreenDialog: true,
         ),
       );
+    }
+  }
+
+  /// Pick a product in this store (products without a barcode first) and save [code] as its barcode.
+  Future<void> _linkBarcode(String code) async {
+    final picked = await showModalBottomSheet<Product>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => _LinkBarcodeSheet(code: code, products: _latest),
+    );
+    if (picked == null || !mounted) return;
+    try {
+      await Db.setSku(picked.id, code);
+      if (mounted) showMessage(context, 'Barcode $code saved for ${picked.name}. Scan the next box.');
+    } catch (e) {
+      if (mounted) showMessage(context, 'Could not save the barcode: $e');
     }
   }
 
@@ -521,6 +547,85 @@ class _ProductCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+
+/// List of this store's products to attach a scanned barcode to.
+class _LinkBarcodeSheet extends StatefulWidget {
+  final String code;
+  final List<Product> products;
+  const _LinkBarcodeSheet({required this.code, required this.products});
+
+  @override
+  State<_LinkBarcodeSheet> createState() => _LinkBarcodeSheetState();
+}
+
+class _LinkBarcodeSheetState extends State<_LinkBarcodeSheet> {
+  String _q = '';
+  bool _showAll = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final list = widget.products
+        .where((p) => _showAll || p.sku.trim().isEmpty)
+        .where((p) => _q.isEmpty || p.name.toLowerCase().contains(_q))
+        .toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+    return SizedBox(
+      height: MediaQuery.of(context).size.height * 0.85,
+      child: Column(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+          child: Text('Which product is barcode ${widget.code}?', style: Theme.of(context).textTheme.titleMedium),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: TextField(
+            autofocus: true,
+            decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Type part of the name'),
+            onChanged: (v) => setState(() => _q = v.trim().toLowerCase()),
+          ),
+        ),
+        SwitchListTile(
+          dense: true,
+          title: const Text('Also show products that already have a barcode'),
+          value: _showAll,
+          onChanged: (v) => setState(() => _showAll = v),
+        ),
+        Expanded(
+          child: list.isEmpty
+              ? const Center(child: Text('No matching products'))
+              : ListView.builder(
+                  itemCount: list.length,
+                  itemBuilder: (_, i) {
+                    final p = list[i];
+                    return ListTile(
+                      title: Text(p.name),
+                      subtitle: Text(p.sku.trim().isEmpty ? 'No barcode · stock ${p.quantity}' : 'Barcode ${p.sku} · stock ${p.quantity}'),
+                      onTap: () async {
+                        final ok = await showDialog<bool>(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('Save barcode?'),
+                            content: Text(p.sku.trim().isEmpty
+                                ? 'Save barcode ${widget.code} for "${p.name}"?'
+                                : '"${p.name}" already has barcode ${p.sku}. Replace it with ${widget.code}?'),
+                            actions: [
+                              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                              FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
+                            ],
+                          ),
+                        );
+                        if (ok == true && context.mounted) Navigator.pop(context, p);
+                      },
+                    );
+                  },
+                ),
+        ),
+      ]),
     );
   }
 }

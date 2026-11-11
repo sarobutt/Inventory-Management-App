@@ -729,6 +729,10 @@ class Db {
     return snap.docs.isEmpty ? null : Product.fromDoc(snap.docs.first);
   }
 
+  /// Attaches a scanned barcode to an existing product (e.g. one imported without barcodes).
+  static Future<void> setSku(String productId, String sku) =>
+      _products.doc(productId).update({'sku': cleanBarcode(sku), 'updatedAt': FieldValue.serverTimestamp()});
+
   /// Products (in any store) with this SKU/barcode (leading zeros and spreadsheet formats ignored).
   static Future<List<Product>> findBySku(String sku) async {
     final variants = barcodeVariants(sku);
