@@ -621,15 +621,26 @@ class Db {
   /// Moves products to [target] (and its company). Prices, reorder level and pending
   /// staff requests move too, and the stock movement is recorded in the audit.
   ///
+  /// [quantities] (product id → units) moves only part of a product's stock. The rest
+  /// stays in the current store with its pending requests; the moved units join the same
+  /// barcode in [target], or become a copy of the product there (same prices and details).
+  /// Products not in the map, or with an amount at or above their stock, move completely.
+  ///
   /// If the target store already has a product with the same SKU:
-  ///  - [mergeDuplicates] true  → the stock is added to that product and this one is removed;
+  ///  - [mergeDuplicates] true  → the stock is added to that product (and a full move removes this one);
   ///  - [mergeDuplicates] false → the product is skipped.
-  static Future<MoveResult> moveProducts(List<Product> products, Store target, {required bool mergeDuplicates}) async {
+  static Future<MoveResult> moveProducts(
+    List<Product> products,
+    Store target, {
+    required bool mergeDuplicates,
+    Map<String, int>? quantities,
+  }) async {
     var moved = 0, merged = 0, skipped = 0;
     final to = await Audit.names(target.id, target.companyId);
 
     for (final p in products) {
-      if (p.storeId == target.id) {
+      final wanted = quantities?[p.id];
+      if (p.storeId == target.id || (wanted != null && wanted <= 0)) {
         skipped++;
         continue;
       }
@@ -647,24 +658,71 @@ class Db {
         continue;
       }
 
-      await _fs.runTransaction((tx) async {
+      final done = await _fs.runTransaction<bool>((tx) async {
+        // All reads first (Firestore transactions need reads before writes).
         final srcRef = _products.doc(p.id);
         final srcSnap = await tx.get(srcRef);
-        if (!srcSnap.exists) return;
-        final qty = (srcSnap.data()?['quantity'] as num?)?.toInt() ?? 0;
+        if (!srcSnap.exists) return false;
+        final src = srcSnap.data()!;
+        final qty = (src['quantity'] as num?)?.toInt() ?? 0;
+        final dstRef = duplicate == null ? null : _products.doc(duplicate.id);
+        final dstSnap = dstRef == null ? null : await tx.get(dstRef);
+        if (dstSnap != null && !dstSnap.exists) return false;
+        final dstBefore = (dstSnap?.data()?['quantity'] as num?)?.toInt() ?? 0;
 
-        if (duplicate != null) {
+        // Part of the stock (checked against the live count, not the one on screen).
+        final amount = wanted != null && wanted < qty ? wanted : qty;
+        final partial = amount < qty;
+        final priceSnap = partial && dstRef == null ? await tx.get(_prices.doc(p.id)) : null;
+
+        if (partial) {
+          // ---- move some units; the product and its requests stay here ----
+          final left = qty - amount;
+          final partNote = '$note ($amount of $qty units)';
+          tx.update(srcRef, {'quantity': left, 'updatedAt': FieldValue.serverTimestamp()});
+          tx.set(Audit.col.doc(), Audit.entry(
+            type: AuditType.move, productId: p.id, productName: p.name, sku: p.sku,
+            storeId: p.storeId, companyId: p.companyId, place: from,
+            before: qty, after: left, note: partNote,
+          ));
+          if (dstRef != null) {
+            tx.update(dstRef, {'quantity': dstBefore + amount, 'updatedAt': FieldValue.serverTimestamp()});
+            tx.set(Audit.col.doc(), Audit.entry(
+              type: AuditType.move, productId: duplicate!.id, productName: duplicate.name, sku: duplicate.sku,
+              storeId: target.id, companyId: target.companyId, place: to,
+              before: dstBefore, after: dstBefore + amount, note: '$partNote (merged)',
+            ));
+          } else {
+            // Same product in the new store: copy its details and admin prices.
+            final newRef = _products.doc();
+            tx.set(newRef, {
+              ...src,
+              'storeId': target.id,
+              'companyId': target.companyId,
+              'quantity': amount,
+              'createdAt': FieldValue.serverTimestamp(),
+              'updatedAt': FieldValue.serverTimestamp(),
+            });
+            tx.set(_prices.doc(newRef.id), {
+              ...?priceSnap?.data(),
+              'storeId': target.id,
+              'companyId': target.companyId,
+              'updatedAt': FieldValue.serverTimestamp(),
+            });
+            tx.set(Audit.col.doc(), Audit.entry(
+              type: AuditType.move, productId: newRef.id, productName: p.name, sku: p.sku,
+              storeId: target.id, companyId: target.companyId, place: to,
+              before: 0, after: amount, note: partNote,
+            ));
+          }
+        } else if (dstRef != null) {
           // ---- merge into the existing product in the target store ----
-          final dstRef = _products.doc(duplicate.id);
-          final dstSnap = await tx.get(dstRef);
-          if (!dstSnap.exists) return;
-          final dstBefore = (dstSnap.data()?['quantity'] as num?)?.toInt() ?? 0;
           tx.update(dstRef, {'quantity': dstBefore + qty, 'updatedAt': FieldValue.serverTimestamp()});
           tx.delete(_prices.doc(p.id));
           tx.delete(srcRef);
           for (final r in pendingReqs.docs) {
             tx.update(r.reference, {
-              'productId': duplicate.id,
+              'productId': duplicate!.id,
               'productName': duplicate.name,
               'storeId': target.id,
               'storeName': to.storeName,
@@ -678,13 +736,13 @@ class Db {
               before: qty, after: 0, note: '$note (merged into existing product)',
             ));
             tx.set(Audit.col.doc(), Audit.entry(
-              type: AuditType.move, productId: duplicate.id, productName: duplicate.name, sku: duplicate.sku,
+              type: AuditType.move, productId: duplicate!.id, productName: duplicate.name, sku: duplicate.sku,
               storeId: target.id, companyId: target.companyId, place: to,
               before: dstBefore, after: dstBefore + qty, note: '$note (merged)',
             ));
           }
         } else {
-          // ---- plain move ----
+          // ---- plain move of the whole product ----
           tx.update(srcRef, {
             'storeId': target.id,
             'companyId': target.companyId,
@@ -711,8 +769,11 @@ class Db {
             ));
           }
         }
+        return true;
       });
-      if (duplicate != null) {
+      if (!done) {
+        skipped++;
+      } else if (duplicate != null) {
         merged++;
       } else {
         moved++;

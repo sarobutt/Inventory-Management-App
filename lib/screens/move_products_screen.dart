@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../data.dart';
 import '../widgets.dart';
@@ -96,6 +97,114 @@ class _DestinationPickerState extends State<_DestinationPicker> {
   }
 }
 
+/// Asks how many units of [product] to move (1 to its stock). Returns null if cancelled.
+Future<int?> askMoveQuantity(BuildContext context, Product product, {int? initial}) {
+  return showDialog<int>(
+    context: context,
+    builder: (ctx) => _MoveQuantityDialog(product: product, initial: initial ?? product.quantity),
+  );
+}
+
+class _MoveQuantityDialog extends StatefulWidget {
+  final Product product;
+  final int initial;
+  const _MoveQuantityDialog({required this.product, required this.initial});
+
+  @override
+  State<_MoveQuantityDialog> createState() => _MoveQuantityDialogState();
+}
+
+class _MoveQuantityDialogState extends State<_MoveQuantityDialog> {
+  late final TextEditingController _c = TextEditingController(text: '${widget.initial}');
+
+  int get _max => widget.product.quantity;
+  int? get _value => int.tryParse(_c.text.trim());
+  bool get _valid => _value != null && _value! >= 1 && _value! <= _max;
+
+  void _set(int v) {
+    final n = v.clamp(1, _max);
+    setState(() => _c.text = '$n');
+    _c.selection = TextSelection.collapsed(offset: _c.text.length);
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = _value;
+    final left = v == null ? null : _max - v;
+    return AlertDialog(
+      title: const Text('How many to move?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(widget.product.name, style: Theme.of(context).textTheme.titleMedium),
+          Text('In stock: $_max'),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              IconButton.filledTonal(
+                tooltip: 'One less',
+                onPressed: v != null && v > 1 ? () => _set(v - 1) : null,
+                icon: const Icon(Icons.remove),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextField(
+                  controller: _c,
+                  autofocus: true,
+                  textAlign: TextAlign.center,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: InputDecoration(
+                    labelText: 'Quantity',
+                    errorText: _c.text.isEmpty || _valid ? null : 'Enter 1 to $_max',
+                  ),
+                  onChanged: (_) => setState(() {}),
+                  onSubmitted: (_) {
+                    if (_valid) Navigator.pop(context, _value);
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              IconButton.filledTonal(
+                tooltip: 'One more',
+                onPressed: v != null && v < _max ? () => _set(v + 1) : null,
+                icon: const Icon(Icons.add),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: ActionChip(label: Text('All ($_max)'), onPressed: () => _set(_max)),
+          ),
+          if (_valid && left! > 0) ...[
+            const SizedBox(height: 8),
+            Text('$left will stay in this store.',
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(onPressed: _valid ? () => Navigator.pop(context, _value) : null, child: const Text('OK')),
+      ],
+    );
+  }
+}
+
+/// True when [quantities] moves only part of [p]'s stock.
+bool _isPartial(Product p, Map<String, int>? quantities) {
+  final q = quantities?[p.id];
+  return q != null && q < p.quantity;
+}
+
 /// Asks how to handle products whose barcode already exists in the target store.
 /// Returns true = merge, false = skip, null = cancel.
 Future<bool?> askDuplicateHandling(BuildContext context, List<(Product, Product)> conflicts, Store target) {
@@ -108,7 +217,8 @@ Future<bool?> askDuplicateHandling(BuildContext context, List<(Product, Product)
       title: Text('${conflicts.length} already in ${target.name}'),
       content: Text(
         'These barcodes already exist in ${target.name}:\n\n$names$more\n\n'
-        'Merge: add their stock to the existing product there and remove the copy here.\n'
+        'Merge: add the moved stock to the existing product there '
+        '(if all of it moves, the copy here is removed).\n'
         'Skip: leave them where they are.',
       ),
       actions: [
@@ -121,9 +231,24 @@ Future<bool?> askDuplicateHandling(BuildContext context, List<(Product, Product)
 }
 
 /// Full move flow for a list of products: choose destination, resolve duplicates, confirm, move.
+/// [quantities] (product id → units) moves only part of a product's stock; for a single
+/// product with more than one unit, the amount is asked first when not given.
 /// Returns the result, or null if cancelled.
-Future<MoveResult?> runMoveFlow(BuildContext context, List<Product> products, {required String fromStoreId}) async {
+Future<MoveResult?> runMoveFlow(
+  BuildContext context,
+  List<Product> products, {
+  required String fromStoreId,
+  Map<String, int>? quantities,
+}) async {
   if (products.isEmpty) return null;
+
+  if (quantities == null && products.length == 1 && products.first.quantity > 1) {
+    final p = products.first;
+    final n = await askMoveQuantity(context, p);
+    if (n == null || !context.mounted) return null;
+    quantities = {p.id: n};
+  }
+
   final target = await pickDestinationStore(context, excludeStoreId: fromStoreId);
   if (target == null || !context.mounted) return null;
 
@@ -141,14 +266,25 @@ Future<MoveResult?> runMoveFlow(BuildContext context, List<Product> products, {r
     if (choice == null || !context.mounted) return null;
     merge = choice;
   } else {
+    final partial = products.where((p) => _isPartial(p, quantities)).toList();
+    final String what;
+    if (products.length == 1 && partial.isNotEmpty) {
+      final p = products.first;
+      what = 'Move ${quantities![p.id]} of ${p.quantity}?';
+    } else {
+      what = 'Move ${products.length} product${products.length == 1 ? '' : 's'}?';
+    }
+    final details = partial.isEmpty
+        ? 'To ${target.name}. Stock, prices, reorder levels and pending requests move with '
+            '${products.length == 1 ? 'it' : 'them'}.'
+        : 'To ${target.name}. ${products.length == 1 ? 'The rest stays' : 'For ${partial.length} of them only part of the stock moves; the rest stays'} '
+            'here with any pending requests, and a copy of the product (same prices and details) '
+            'is made in ${target.name}.';
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Move ${products.length} product${products.length == 1 ? '' : 's'}?'),
-        content: Text(
-          'To ${target.name}. Stock, prices, reorder levels and pending requests move with '
-          '${products.length == 1 ? 'it' : 'them'}. The move is recorded in the stock audit.',
-        ),
+        title: Text(what),
+        content: Text('$details The move is recorded in the stock audit.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Move')),
@@ -158,7 +294,7 @@ Future<MoveResult?> runMoveFlow(BuildContext context, List<Product> products, {r
     if (ok != true || !context.mounted) return null;
   }
 
-  return Db.moveProducts(products, target, mergeDuplicates: merge);
+  return Db.moveProducts(products, target, mergeDuplicates: merge, quantities: quantities);
 }
 
 /// Admin: choose several products in a store and move them to another store.
@@ -173,6 +309,9 @@ class MoveProductsScreen extends StatefulWidget {
 class _MoveProductsScreenState extends State<MoveProductsScreen> {
   late final Stream<List<Product>> _products = Db.watchProducts(storeId: widget.store.id);
   final Set<String> _selected = {};
+
+  /// Units to move per selected product (missing = all of its stock).
+  final Map<String, int> _amounts = {};
   String _q = '';
   bool _moving = false;
 
@@ -180,7 +319,16 @@ class _MoveProductsScreenState extends State<MoveProductsScreen> {
     final chosen = all.where((p) => _selected.contains(p.id)).toList();
     setState(() => _moving = true);
     try {
-      final result = await runMoveFlow(context, chosen, fromStoreId: widget.store.id);
+      final result = await runMoveFlow(
+        context,
+        chosen,
+        fromStoreId: widget.store.id,
+        // Only products moving part of their stock need an amount; the rest move completely.
+        quantities: {
+          for (final p in chosen)
+            if (_amounts[p.id] != null && _amounts[p.id]! < p.quantity) p.id: _amounts[p.id]!,
+        },
+      );
       if (!mounted) return;
       if (result == null) {
         setState(() => _moving = false);
@@ -218,6 +366,9 @@ class _MoveProductsScreenState extends State<MoveProductsScreen> {
                     : () => setState(() {
                           if (allShownSelected) {
                             _selected.removeAll(shown.map((p) => p.id));
+                            for (final p in shown) {
+                              _amounts.remove(p.id);
+                            }
                           } else {
                             _selected.addAll(shown.map((p) => p.id));
                           }
@@ -257,23 +408,67 @@ class _MoveProductsScreenState extends State<MoveProductsScreen> {
                         const SizedBox(height: 8),
                         if (shown.isEmpty) const EmptyState(icon: Icons.inventory_2_outlined, title: 'No products'),
                         for (final p in shown)
-                          CheckboxListTile(
-                            value: _selected.contains(p.id),
-                            onChanged: (v) => setState(() {
-                              if (v == true) {
+                          _ProductRow(
+                            product: p,
+                            selected: _selected.contains(p.id),
+                            amount: (_amounts[p.id] ?? p.quantity).clamp(0, p.quantity),
+                            onSelected: (v) => setState(() {
+                              if (v) {
                                 _selected.add(p.id);
                               } else {
                                 _selected.remove(p.id);
+                                _amounts.remove(p.id);
                               }
                             }),
-                            title: Text(p.name),
-                            subtitle: Text([if (p.sku.isNotEmpty) 'SKU ${p.sku}', 'Stock ${p.quantity}'].join(' · ')),
-                            controlAffinity: ListTileControlAffinity.leading,
+                            onChangeAmount: () async {
+                              final n = await askMoveQuantity(context, p, initial: _amounts[p.id]);
+                              if (n != null && mounted) setState(() => _amounts[p.id] = n);
+                            },
                           ),
                       ],
                     ),
         );
       },
+    );
+  }
+}
+
+/// One product in the move list: tick to select, then tap the amount to move only part of it.
+class _ProductRow extends StatelessWidget {
+  final Product product;
+  final bool selected;
+  final int amount;
+  final ValueChanged<bool> onSelected;
+  final VoidCallback onChangeAmount;
+
+  const _ProductRow({
+    required this.product,
+    required this.selected,
+    required this.amount,
+    required this.onSelected,
+    required this.onChangeAmount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final p = product;
+    final canChoose = selected && p.quantity > 1;
+    return CheckboxListTile(
+      value: selected,
+      onChanged: (v) => onSelected(v == true),
+      title: Text(p.name),
+      subtitle: Text([if (p.sku.isNotEmpty) 'SKU ${p.sku}', 'Stock ${p.quantity}'].join(' · ')),
+      controlAffinity: ListTileControlAffinity.leading,
+      secondary: !selected
+          ? null
+          : canChoose
+              ? ActionChip(
+                  avatar: const Icon(Icons.edit_outlined, size: 18),
+                  label: Text(amount >= p.quantity ? 'All ${p.quantity}' : 'Move $amount of ${p.quantity}'),
+                  tooltip: 'How many to move',
+                  onPressed: onChangeAmount,
+                )
+              : Text(p.quantity == 1 ? 'Move 1' : 'No stock to move'),
     );
   }
 }
