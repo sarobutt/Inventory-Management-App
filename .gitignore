@@ -6,3 +6,8 @@ build/
 *.iml
 .idea/
 ios/Pods/
+
+# Firebase keys and exports (never commit)
+*service-account*.json
+*firebase-adminsdk*.json
+products_export_*.xlsx
