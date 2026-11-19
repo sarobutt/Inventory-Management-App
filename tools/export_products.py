@@ -4,7 +4,8 @@ Columns: Product name, Barcode, Quantity, Cost price, Wholesale price, Retail pr
 
 How to run (on your Mac, in VS Code's terminal):
     pip3 install firebase-admin openpyxl
-    python3 tools/export_products.py ~/Downloads/service-account.json
+    python3 tools/export_products.py        (finds the Firebase key in Downloads)
+    python3 tools/export_products.py <path to key .json>
 
 The file is saved as  products_export_<date>.xlsx  next to where you ran it.
 The service-account key gives full access to your database: keep it on your computer,
@@ -18,10 +19,19 @@ from pathlib import Path
 
 
 def main() -> int:
-    if len(sys.argv) < 2:
-        print("Usage: python3 tools/export_products.py <path to service-account .json>")
-        return 1
-    key = Path(sys.argv[1]).expanduser()
+    if len(sys.argv) >= 2:
+        key = Path(sys.argv[1]).expanduser()
+    else:
+        # No path given: use the newest Firebase key in Downloads.
+        found = sorted(Path("~/Downloads").expanduser().glob("*firebase-adminsdk*.json"),
+                       key=lambda f: f.stat().st_mtime, reverse=True)
+        if not found:
+            print("No Firebase key found in your Downloads folder.")
+            print("Download it: Firebase console > gear icon > Project settings > Service accounts >")
+            print("Generate new private key. Then run this command again.")
+            return 1
+        key = found[0]
+        print(f"Using key: {key.name}")
     if not key.exists():
         print(f"Key file not found: {key}")
         return 1
