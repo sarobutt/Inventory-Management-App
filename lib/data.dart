@@ -165,6 +165,12 @@ class Product {
   final int? reorderLevel;
   final String description;
 
+  /// Batch / lot code printed on the product (letters and numbers), '' if none.
+  final String batchCode;
+
+  /// Expiry date of this stock (date only), null if none.
+  final DateTime? expiryDate;
+
   const Product({
     required this.id,
     required this.companyId,
@@ -175,7 +181,17 @@ class Product {
     required this.quantity,
     this.reorderLevel,
     required this.description,
+    this.batchCode = '',
+    this.expiryDate,
   });
+
+  /// Expired already (expiry date before today).
+  bool get isExpired {
+    final e = expiryDate;
+    if (e == null) return false;
+    final now = DateTime.now();
+    return e.isBefore(DateTime(now.year, now.month, now.day));
+  }
 
   int get effectiveReorderLevel => reorderLevel ?? defaultReorderLevel;
 
@@ -201,6 +217,8 @@ class Product {
         quantity: quantity,
         reorderLevel: reorderLevel,
         description: description,
+        batchCode: batchCode,
+        expiryDate: expiryDate,
       );
 
   factory Product.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -217,9 +235,22 @@ class Product {
       quantity: (d['quantity'] as num?)?.toInt() ?? 0,
       reorderLevel: (d['reorderLevel'] as num?)?.toInt(),
       description: (d['description'] as String?) ?? '',
+      batchCode: (d['batchCode'] as String?) ?? '',
+      expiryDate: d['expiryDate'] is Timestamp ? (d['expiryDate'] as Timestamp).toDate().toLocal() : null,
     );
   }
 }
+
+/// Date as dd/mm/yyyy ('' for null).
+String formatDate(DateTime? d) => d == null
+    ? ''
+    : '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+
+/// Batch codes: letters and numbers (a dash, slash or dot inside is allowed too).
+final RegExp batchCodePattern = RegExp(r'^[A-Za-z0-9][A-Za-z0-9\-/.]*$');
+
+/// Firestore value for an expiry date (date only, midday UTC so time zones never shift the day).
+Object? expiryValue(DateTime? d) => d == null ? null : Timestamp.fromDate(DateTime.utc(d.year, d.month, d.day, 12));
 
 /// Outcome of [Db.moveProducts].
 class MoveResult {
@@ -470,6 +501,8 @@ class Db {
     required int quantity,
     required int? reorderLevel,
     required String description,
+    String batchCode = '',
+    DateTime? expiryDate,
   }) async {
     final ref = _products.doc();
     final place = await Audit.names(storeId, companyId);
@@ -483,6 +516,8 @@ class Db {
       'quantity': quantity,
       'reorderLevel': reorderLevel,
       'description': description,
+      'batchCode': batchCode.trim(),
+      'expiryDate': expiryValue(expiryDate),
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
@@ -515,6 +550,8 @@ class Db {
     required int previousQuantity,
     required int? reorderLevel,
     required String description,
+    String batchCode = '',
+    DateTime? expiryDate,
   }) async {
     final place = quantity != previousQuantity ? await Audit.names(storeId, companyId) : null;
     final batch = _fs.batch();
@@ -526,6 +563,8 @@ class Db {
       'quantity': quantity,
       'reorderLevel': reorderLevel,
       'description': description,
+      'batchCode': batchCode.trim(),
+      'expiryDate': expiryValue(expiryDate),
       'updatedAt': FieldValue.serverTimestamp(),
     });
     batch.set(_prices.doc(id), _priceDoc(prices, companyId, storeId));

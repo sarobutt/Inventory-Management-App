@@ -447,6 +447,8 @@ class _ProductCard extends StatelessWidget {
       if (isAdmin && p.prices.cost != null) 'Cost ${formatPrice(p.prices.cost)}',
       if (isAdmin && p.prices.wholesale != null) 'Wholesale ${formatPrice(p.prices.wholesale)}',
       if (p.prices.retail != null) 'Retail ${formatPrice(p.prices.retail)}',
+      if (p.batchCode.isNotEmpty) 'Batch ${p.batchCode}',
+      if (p.expiryDate != null) '${p.isExpired ? 'EXPIRED' : 'Exp'} ${formatDate(p.expiryDate)}',
     ].join(' · ');
     final pendingText = pending.map((d) => d > 0 ? '+$d' : '$d').join(', ');
 

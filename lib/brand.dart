@@ -681,6 +681,9 @@ const String _logoBase64 = ''
 
 final Uint8List _logoBytes = base64Decode(_logoBase64);
 
+/// The logo as PNG bytes (for PDFs and printouts).
+Uint8List get brandLogoPng => _logoBytes;
+
 /// The Beauty Souq logo mark (transparent background).
 class BrandLogo extends StatelessWidget {
   final double height;

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../auth.dart';
 import '../data.dart';
+import '../export.dart';
 import '../report.dart';
 import '../widgets.dart';
 
@@ -118,16 +119,17 @@ class _TablesScreenState extends State<TablesScreen> with SingleTickerProviderSt
     }
   }
 
-  Future<void> _run(Future<void> Function(TableData t, {String filterText}) action) async {
+  Future<void> _export() async {
     if (!_loaded || _busy) return;
-    setState(() => _busy = true);
-    try {
-      await action(_table(TableKind.values[_tabs.index]), filterText: _filterText);
-    } catch (e) {
-      if (mounted) showError(context, e);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    final t = _table(TableKind.values[_tabs.index]);
+    final filter = _filterText;
+    await showExportSheet(
+      context,
+      title: t.title,
+      fileBaseName: t.title,
+      pdf: () => buildPdf(t, filterText: filter),
+      xlsx: () async => tableToXlsx(t),
+    );
   }
 
   @override
@@ -143,14 +145,9 @@ class _TablesScreenState extends State<TablesScreen> with SingleTickerProviderSt
             )
           else ...[
             IconButton(
-              tooltip: 'Share as PDF',
-              icon: const Icon(Icons.share_outlined),
-              onPressed: _loaded ? () => _run(shareTable) : null,
-            ),
-            IconButton(
-              tooltip: 'Print',
-              icon: const Icon(Icons.print_outlined),
-              onPressed: _loaded ? () => _run(printTable) : null,
+              tooltip: 'Print, share or save (PDF, PNG, Excel)',
+              icon: const Icon(Icons.ios_share),
+              onPressed: _loaded ? _export : null,
             ),
           ],
         ],

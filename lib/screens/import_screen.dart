@@ -174,6 +174,8 @@ class _ImportScreenState extends State<ImportScreen> {
       ('Quantity', 'Optional, stock count'),
       ('Reorder Level', 'Optional, “needs ordering” alert level'),
       ('Description', 'Optional'),
+      ('Batch Code', 'Optional, letters and numbers'),
+      ('Expiry Date', 'Optional, e.g. 30/11/2027 or 11/2027'),
     ];
     return Card(
       child: Padding(

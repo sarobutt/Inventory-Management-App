@@ -33,6 +33,8 @@ class ImportRow {
   final int? quantity;
   final int? reorderLevel;
   final String description;
+  final String batchCode;
+  final DateTime? expiryDate;
   final String? error;
 
   const ImportRow({
@@ -43,6 +45,8 @@ class ImportRow {
     required this.quantity,
     this.reorderLevel,
     required this.description,
+    this.batchCode = '',
+    this.expiryDate,
     this.error,
   });
 }
@@ -211,7 +215,7 @@ List<List<String>> _readXlsx(Uint8List bytes) {
 //  Turning the grid into rows
 // ---------------------------------------------------------------------
 
-enum _Col { product, sku, cost, wholesale, retail, quantity, reorder, description }
+enum _Col { product, sku, cost, wholesale, retail, quantity, reorder, description, batch, expiry }
 
 const Map<_Col, List<String>> _aliases = {
   _Col.product: ['product', 'productname', 'name', 'item', 'itemname'],
@@ -225,7 +229,44 @@ const Map<_Col, List<String>> _aliases = {
     'lowstock', 'lowstocklevel', 'alertat',
   ],
   _Col.description: ['description', 'notes', 'details', 'comment', 'comments'],
+  _Col.batch: ['batchcode', 'batch', 'batchno', 'batchnumber', 'lot', 'lotno', 'lotnumber', 'lotcode'],
+  _Col.expiry: ['expirydate', 'expiry', 'expiration', 'expirationdate', 'exp', 'expdate', 'bestbefore', 'usebefore'],
 };
+
+/// Reads an expiry date: Excel date cells, dd/mm/yyyy, yyyy-mm-dd, or mm/yyyy (= end of that month).
+DateTime? parseDate(String raw) {
+  final t = raw.trim();
+  if (t.isEmpty) return null;
+  final serial = double.tryParse(t);
+  if (serial != null) {
+    // Excel stores dates as days since 30 Dec 1899.
+    if (serial < 20000 || serial > 80000) return null;
+    final d = DateTime.utc(1899, 12, 30).add(Duration(days: serial.floor()));
+    return DateTime(d.year, d.month, d.day);
+  }
+  final iso = RegExp(r'^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})').firstMatch(t);
+  if (iso != null) return _date(int.parse(iso.group(1)!), int.parse(iso.group(2)!), int.parse(iso.group(3)!));
+  final dmy = RegExp(r'^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$').firstMatch(t);
+  if (dmy != null) {
+    var y = int.parse(dmy.group(3)!);
+    if (y < 100) y += 2000;
+    return _date(y, int.parse(dmy.group(2)!), int.parse(dmy.group(1)!));
+  }
+  final my = RegExp(r'^(\d{1,2})[-/.](\d{4})$').firstMatch(t);
+  if (my != null) {
+    final m = int.parse(my.group(1)!);
+    final y = int.parse(my.group(2)!);
+    if (m < 1 || m > 12) return null;
+    return DateTime(y, m + 1, 0); // last day of that month
+  }
+  return null;
+}
+
+DateTime? _date(int y, int m, int d) {
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  final out = DateTime(y, m, d);
+  return out.month == m ? out : null; // rejects 31/02 etc.
+}
 
 String _norm(String s) => s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
 
@@ -278,6 +319,9 @@ List<ImportRow> rowsFromGrid(List<List<String>> grid) {
     final reorderText = cell(r, _Col.reorder);
     final reorder = parseQuantity(reorderText);
     final product = cell(r, _Col.product);
+    final batchText = cell(r, _Col.batch);
+    final expiryText = cell(r, _Col.expiry);
+    final expiry = parseDate(expiryText);
 
     // Three prices; remember the first one that can't be read.
     String? priceError;
@@ -306,6 +350,10 @@ List<ImportRow> rowsFromGrid(List<List<String>> grid) {
       error = 'Invalid reorder level "$reorderText"';
     } else if (qtyText.isNotEmpty && (qty == null || qty < 0)) {
       error = 'Invalid quantity "$qtyText"';
+    } else if (batchText.isNotEmpty && !batchCodePattern.hasMatch(batchText)) {
+      error = 'Batch code "$batchText" must be letters and numbers';
+    } else if (expiryText.isNotEmpty && expiry == null) {
+      error = 'Invalid expiry date "$expiryText" (use dd/mm/yyyy)';
     }
 
     out.add(ImportRow(
@@ -316,6 +364,8 @@ List<ImportRow> rowsFromGrid(List<List<String>> grid) {
       quantity: qty,
       reorderLevel: reorder,
       description: cell(r, _Col.description),
+      batchCode: batchText,
+      expiryDate: expiry,
       error: error,
     ));
   }
@@ -353,6 +403,8 @@ class _ProductWrite {
   final int previousQuantity; // 0 for new products
   int? reorderLevel;
   String description;
+  String batchCode;
+  DateTime? expiryDate;
 
   _ProductWrite({
     required this.existingId,
@@ -363,6 +415,8 @@ class _ProductWrite {
     required this.quantity,
     required this.reorderLevel,
     required this.description,
+    this.batchCode = '',
+    this.expiryDate,
   });
 }
 
@@ -421,6 +475,8 @@ ImportPlan buildPlan({
       pending.prices = pending.prices.mergedWith(row.prices);
       if (row.reorderLevel != null) pending.reorderLevel = row.reorderLevel;
       if (row.description.isNotEmpty) pending.description = row.description;
+      if (row.batchCode.isNotEmpty) pending.batchCode = row.batchCode;
+      if (row.expiryDate != null) pending.expiryDate = row.expiryDate;
       pending.name = row.product;
       results.add(RowResult(
         row,
@@ -439,6 +495,8 @@ ImportPlan buildPlan({
         quantity: qty,
         reorderLevel: row.reorderLevel ?? existing.reorderLevel,
         description: row.description.isNotEmpty ? row.description : existing.description,
+        batchCode: row.batchCode.isNotEmpty ? row.batchCode : existing.batchCode,
+        expiryDate: row.expiryDate ?? existing.expiryDate,
       );
       results.add(RowResult(row, RowStatus.update, 'Qty ${existing.quantity} → $qty'));
     } else {
@@ -450,6 +508,8 @@ ImportPlan buildPlan({
         quantity: row.quantity ?? 0,
         reorderLevel: row.reorderLevel,
         description: row.description,
+        batchCode: row.batchCode,
+        expiryDate: row.expiryDate,
       );
       results.add(RowResult(row, RowStatus.newProduct, 'New'));
     }
@@ -482,6 +542,8 @@ Future<void> runImport(ImportPlan plan, {void Function(double progress)? onProgr
         'quantity': p.quantity,
         'reorderLevel': p.reorderLevel,
         'description': p.description,
+        'batchCode': p.batchCode,
+        'expiryDate': expiryValue(p.expiryDate),
         'updatedAt': FieldValue.serverTimestamp(),
       };
       final DocumentReference<Map<String, dynamic>> ref;

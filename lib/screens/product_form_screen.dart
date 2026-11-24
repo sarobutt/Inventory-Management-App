@@ -40,6 +40,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   late final _quantity = TextEditingController(text: '${widget.product?.quantity ?? 0}');
   late final _reorder = TextEditingController(text: widget.product?.reorderLevel?.toString() ?? '');
   late final _description = TextEditingController(text: widget.product?.description ?? '');
+  late final _batch = TextEditingController(text: widget.product?.batchCode ?? '');
+  late DateTime? _expiry = widget.product?.expiryDate;
   bool _saving = false;
 
   // Barcode lookup state
@@ -129,6 +131,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     _quantity.dispose();
     _reorder.dispose();
     _description.dispose();
+    _batch.dispose();
     super.dispose();
   }
 
@@ -170,6 +173,18 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     return false;
   }
 
+  Future<void> _pickExpiry() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _expiry ?? DateTime(now.year + 1, now.month, now.day),
+      firstDate: DateTime(now.year - 5),
+      lastDate: DateTime(now.year + 20),
+      helpText: 'Expiry date',
+    );
+    if (picked != null && mounted) setState(() => _expiry = picked);
+  }
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
@@ -209,6 +224,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           previousQuantity: widget.product!.quantity,
           reorderLevel: reorderLevel,
           description: description,
+          batchCode: _batch.text.trim(),
+          expiryDate: _expiry,
         );
       } else {
         await Db.createProduct(
@@ -220,6 +237,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
           quantity: quantity,
           reorderLevel: reorderLevel,
           description: description,
+          batchCode: _batch.text.trim(),
+          expiryDate: _expiry,
         );
       }
       if (mounted) {
@@ -417,6 +436,44 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                 hintText: 'Default $defaultReorderLevel',
                 helperText: 'Shows “Needs ordering” when stock is at or below this number',
                 prefixIcon: Icon(Icons.notification_important_outlined),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _batch,
+              textCapitalization: TextCapitalization.characters,
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9\-/.]'))],
+              decoration: const InputDecoration(
+                labelText: 'Batch code',
+                hintText: 'Optional, e.g. B2311A',
+                prefixIcon: Icon(Icons.qr_code_2),
+              ),
+              validator: (v) {
+                final t = (v ?? '').trim();
+                if (t.isEmpty) return null;
+                return batchCodePattern.hasMatch(t) ? null : 'Use letters and numbers only';
+              },
+            ),
+            const SizedBox(height: 16),
+            InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: _pickExpiry,
+              child: InputDecorator(
+                decoration: InputDecoration(
+                  labelText: 'Expiry date',
+                  prefixIcon: const Icon(Icons.event_outlined),
+                  suffixIcon: _expiry == null
+                      ? null
+                      : IconButton(
+                          tooltip: 'Remove expiry date',
+                          icon: const Icon(Icons.clear),
+                          onPressed: () => setState(() => _expiry = null),
+                        ),
+                ),
+                child: Text(
+                  _expiry == null ? 'Optional – tap to choose' : formatDate(_expiry),
+                  style: _expiry == null ? TextStyle(color: Theme.of(context).hintColor) : null,
+                ),
               ),
             ),
             const SizedBox(height: 16),

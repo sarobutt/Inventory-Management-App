@@ -6,6 +6,7 @@ import 'package:printing/printing.dart';
 
 import 'brand.dart';
 import 'data.dart';
+import 'export.dart';
 import 'widgets.dart';
 
 /// A table ready to show on screen or print.
@@ -228,4 +229,69 @@ Future<void> printTable(TableData t, {String filterText = ''}) async {
 Future<void> shareTable(TableData t, {String filterText = ''}) async {
   final bytes = await buildPdf(t, filterText: filterText);
   await Printing.sharePdf(bytes: bytes, filename: '${t.title.toLowerCase()}.pdf');
+}
+
+/// The table as an Excel file: number columns become real numbers, the SKU column stays text.
+Uint8List tableToXlsx(TableData t) {
+  final skuCol = t.headers.indexWhere((h) => h == 'SKU' || h == 'Barcode');
+  Object? value(int col, String text) {
+    if (!t.numericColumns.contains(col) || text.trim().isEmpty) return text;
+    final v = parseMoney(text);
+    if (v == null) return text;
+    return v == v.roundToDouble() && !text.contains('.') ? v.toInt() : v;
+  }
+
+  return buildXlsx(
+    [
+      t.headers,
+      for (final r in t.rows) [for (var i = 0; i < r.length; i++) value(i, r[i])],
+      if (t.totals != null) [for (var i = 0; i < t.totals!.length; i++) value(i, t.totals![i])],
+    ],
+    sheetName: t.title,
+    textColumns: {if (skuCol >= 0) skuCol},
+    widths: [for (final h in t.headers) h == 'Product' || h == 'Description' || h == 'Address' ? 36.0 : 16.0],
+  );
+}
+
+/// Every product with all its details as an Excel file.
+/// Staff ([showPrices] false) get no cost or wholesale columns.
+Uint8List allProductsXlsx(List<Product> products, List<Company> companies, List<Store> stores,
+    {required bool showPrices}) {
+  final companyName = {for (final c in companies) c.id: c.name};
+  final storeName = {for (final s in stores) s.id: s.name};
+  final sorted = [...products]..sort((a, b) {
+      final byCompany = (companyName[a.companyId] ?? '').toLowerCase().compareTo((companyName[b.companyId] ?? '').toLowerCase());
+      if (byCompany != 0) return byCompany;
+      final byStore = (storeName[a.storeId] ?? '').toLowerCase().compareTo((storeName[b.storeId] ?? '').toLowerCase());
+      return byStore != 0 ? byStore : a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    });
+  return buildXlsx(
+    [
+      [
+        'Product name', 'Barcode', 'Company', 'Storage unit', 'Quantity', 'Reorder level',
+        if (showPrices) 'Cost price (QAR)',
+        if (showPrices) 'Wholesale price (QAR)',
+        'Retail price (QAR)', 'Batch code', 'Expiry date', 'Stock status', 'Description',
+      ],
+      for (final p in sorted)
+        [
+          p.name,
+          p.sku,
+          companyName[p.companyId] ?? '',
+          storeName[p.storeId] ?? '',
+          p.quantity,
+          p.effectiveReorderLevel,
+          if (showPrices) p.prices.cost,
+          if (showPrices) p.prices.wholesale,
+          p.prices.retail,
+          p.batchCode,
+          formatDate(p.expiryDate),
+          p.isExpired ? 'Expired' : p.stockStatus,
+          p.description,
+        ],
+    ],
+    sheetName: 'Products',
+    textColumns: {1},
+    widths: [40, 18, 18, 18, 10, 12, if (showPrices) 14, if (showPrices) 18, 16, 14, 12, 15, 30],
+  );
 }

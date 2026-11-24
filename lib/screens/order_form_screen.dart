@@ -8,8 +8,9 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../data.dart';
+import '../export.dart';
+import '../order_docs.dart';
 import '../orders.dart';
-import '../report.dart';
 import '../widgets.dart';
 import 'scanner_screen.dart';
 
@@ -295,37 +296,43 @@ class _OrderFormScreenState extends State<OrderFormScreen> {
     }
   }
 
-  TableData _orderTable() {
-    final o = _current();
-    return TableData(
-      title: 'Purchase order ${o.number}',
-      headers: const ['Product', 'SKU', 'From store', 'Qty', 'Unit price', 'Total'],
-      rows: [
-        for (final l in o.lines)
-          [l.productName, l.sku, l.storeName, count(l.quantity), money(l.unitPrice), money(l.total)],
-      ],
-      numericColumns: const {3, 4, 5},
-      totals: ['TOTAL', '', '', count(o.units), '', money(o.linesTotal)],
+  /// Purchase order or delivery note: print, share, or save as PDF / PNG / Excel.
+  Future<void> _documents() async {
+    final type = await showModalBottomSheet<OrderDocType>(
+      context: context,
+      useSafeArea: true,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Text('Which document?', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+          ),
+          ListTile(
+            leading: const Icon(Icons.local_shipping_outlined),
+            title: const Text('Delivery note'),
+            subtitle: const Text('Wholesale unit price, batch code, expiry · no storage units'),
+            onTap: () => Navigator.pop(ctx, OrderDocType.deliveryNote),
+          ),
+          ListTile(
+            leading: const Icon(Icons.receipt_long_outlined),
+            title: const Text('Purchase order'),
+            subtitle: const Text('Retail price only'),
+            onTap: () => Navigator.pop(ctx, OrderDocType.purchaseOrder),
+          ),
+        ]),
+      ),
     );
-  }
-
-  String _orderHeader() {
+    if (type == null || !mounted) return;
     final o = _current();
-    return [
-      'Customer: ${o.customerName}',
-      if (o.customerRef.isNotEmpty) 'Their ref: ${o.customerRef}',
-      if (o.customerPhone.isNotEmpty) o.customerPhone,
-      'Status: ${orderStatusLabel(o.status)}',
-      'Amount: ${money(o.effectiveAmount)} (${paymentStatusLabel(o.payment)})',
-    ].join('   ');
-  }
-
-  Future<void> _shareOrder() async {
-    try {
-      await shareTable(_orderTable(), filterText: _orderHeader());
-    } catch (e) {
-      if (mounted) showError(context, e);
-    }
+    final date = widget.order?.createdAt;
+    final name = orderDocTitle(type);
+    await showExportSheet(
+      context,
+      title: '$name ${o.number}',
+      fileBaseName: '${name}_${o.number}',
+      pdf: () => buildOrderDocPdf(o, type, date: date),
+      xlsx: () => buildOrderDocXlsx(o, type, date: date),
+    );
   }
 
   // ---------------- UI ----------------
@@ -343,9 +350,9 @@ class _OrderFormScreenState extends State<OrderFormScreen> {
           title: Text(_isNew ? 'New purchase order' : _number),
           actions: [
             IconButton(
-              tooltip: 'Share order as PDF',
-              icon: const Icon(Icons.share_outlined),
-              onPressed: _lines.isEmpty ? null : _shareOrder,
+              tooltip: 'Delivery note / purchase order',
+              icon: const Icon(Icons.description_outlined),
+              onPressed: _lines.isEmpty ? null : _documents,
             ),
             if (!_isNew)
               PopupMenuButton<String>(
@@ -745,6 +752,10 @@ class _SourcePickerState extends State<_SourcePicker> {
         companyId: p.companyId,
         quantity: result.$1,
         unitPrice: result.$2,
+        retailPrice: p.prices.retail,
+        wholesalePrice: p.prices.wholesale,
+        batchCode: p.batchCode,
+        expiryDate: p.expiryDate,
       ),
     );
   }

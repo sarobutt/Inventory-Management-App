@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../auth.dart';
 import '../brand.dart';
 import '../data.dart';
+import '../export.dart';
+import '../report.dart';
 import '../requests.dart';
 import '../widgets.dart';
 import 'audit_screen.dart';
@@ -27,6 +29,25 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
   Stream<List<Store>> _stores = Db.watchStores();
   Stream<List<Product>> _products = Db.watchProducts();
   String _search = '';
+  final _searchCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _exportAll(List<Product> products, List<Company> companies, List<Store> stores,
+      {required bool isAdmin}) async {
+    try {
+      final bytes = allProductsXlsx(products, companies, stores, showPrices: isAdmin);
+      final d = DateTime.now();
+      final stamp = '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+      if (mounted) await saveBytes(context, bytes, 'products_$stamp.xlsx');
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
 
   Future<void> _refresh() => pullRefresh(context, Db.refresh, () {
         if (!mounted) return;
@@ -111,6 +132,14 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                 final q = _search.trim().toLowerCase();
                 final companies =
                     companySnap.data!.where((c) => q.isEmpty || c.name.toLowerCase().contains(q)).toList();
+                final companyName = {for (final c in companySnap.data!) c.id: c.name};
+                final storeName = {for (final s in stores) s.id: s.name};
+                // Product search: exact barcode first, otherwise name / SKU contains the text.
+                var productHits = <Product>[];
+                if (q.isNotEmpty) {
+                  productHits = products.where((p) => sameBarcode(p.sku, q)).toList();
+                  if (productHits.isEmpty) productHits = products.where((p) => productMatches(p.name, p.sku, q)).toList();
+                }
 
                 return RefreshIndicator(
                   onRefresh: _refresh,
@@ -126,6 +155,28 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                       ),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: TextField(
+                        controller: _searchCtrl,
+                        textInputAction: TextInputAction.search,
+                        decoration: InputDecoration(
+                          hintText: 'Search products (name or barcode) or companies',
+                          prefixIcon: const Icon(Icons.search),
+                          suffixIcon: _search.isEmpty
+                              ? null
+                              : IconButton(
+                                  tooltip: 'Clear',
+                                  icon: const Icon(Icons.clear),
+                                  onPressed: () => setState(() {
+                                    _searchCtrl.clear();
+                                    _search = '';
+                                  }),
+                                ),
+                        ),
+                        onChanged: (v) => setState(() => _search = v),
+                      ),
+                    ),
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12),
                       child: Row(
@@ -172,15 +223,61 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                         ),
                       ),
                     ],
-                    const SizedBox(height: 16),
-                    TextField(
-                      decoration: const InputDecoration(
-                        hintText: 'Search companies',
-                        prefixIcon: Icon(Icons.search),
+                    const SizedBox(height: 4),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: products.isEmpty
+                            ? null
+                            : () => _exportAll(products, companySnap.data!, stores, isAdmin: isAdmin),
+                        icon: const Icon(Icons.download_outlined),
+                        label: const Text('Export all products (Excel)'),
                       ),
-                      onChanged: (v) => setState(() => _search = v),
                     ),
-                    const SizedBox(height: 12),
+                    if (q.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      SectionTitle('Products (${productHits.length})'),
+                      if (productHits.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.only(bottom: 8),
+                          child: Text('No products match.'),
+                        ),
+                      for (final p in productHits.take(30))
+                        Card(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          child: ListTile(
+                            leading: const Icon(Icons.inventory_2_outlined),
+                            title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                            subtitle: Text([
+                              '${companyName[p.companyId] ?? ''} · ${storeName[p.storeId] ?? ''}',
+                              [
+                                if (p.sku.isNotEmpty) p.sku,
+                                if (p.prices.retail != null) 'Retail ${money(p.prices.retail!)}',
+                                if (p.expiryDate != null) 'Exp ${formatDate(p.expiryDate)}',
+                              ].join(' · '),
+                            ].where((t) => t.trim().isNotEmpty).join('\n')),
+                            trailing: Text('${p.quantity}',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w700,
+                                  color: p.isOutOfStock ? Theme.of(context).colorScheme.error : null,
+                                )),
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => QuickViewScreen(initialQuery: p.sku.isNotEmpty ? p.sku : p.name),
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (productHits.length > 30)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Text('Showing 30 of ${productHits.length} – type more to narrow it down.'),
+                        ),
+                      SectionTitle('Companies (${companies.length})'),
+                    ] else
+                      const SizedBox(height: 8),
                     if (companies.isEmpty)
                       q.isEmpty
                           ? EmptyState(

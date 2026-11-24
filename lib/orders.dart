@@ -11,7 +11,9 @@ import 'auth.dart';
 //
 //  purchaseOrders/{id}
 //    number, customerName, customerPhone, customerEmail, customerRef, notes
-//    lines: [{productId, productName, sku, storeId, storeName, companyId, quantity, unitPrice}]
+//    lines: [{productId, productName, sku, storeId, storeName, companyId, quantity, unitPrice,
+//             retailPrice, wholesalePrice, batchCode, expiryDate}]   (last four: copied when added,
+//             for the purchase order / delivery note printouts)
 //    linesTotal, units, amount (invoice amount, may differ from linesTotal)
 //    payment: notPaid | pending | paid
 //    status:  draft | completed | cancelled
@@ -52,6 +54,12 @@ class OrderLine {
   final int quantity;
   final double unitPrice;
 
+  /// Copied from the product when the line was added (null on older orders).
+  final double? retailPrice;
+  final double? wholesalePrice;
+  final String batchCode;
+  final DateTime? expiryDate;
+
   const OrderLine({
     required this.productId,
     required this.productName,
@@ -61,11 +69,26 @@ class OrderLine {
     required this.companyId,
     required this.quantity,
     required this.unitPrice,
+    this.retailPrice,
+    this.wholesalePrice,
+    this.batchCode = '',
+    this.expiryDate,
   });
 
   double get total => unitPrice * quantity;
 
-  OrderLine copyWith({int? quantity, double? unitPrice}) => OrderLine(
+  /// True when the product details for printouts were saved with the line.
+  bool get hasProductDetails => retailPrice != null || wholesalePrice != null || batchCode.isNotEmpty || expiryDate != null;
+
+  OrderLine copyWith({
+    int? quantity,
+    double? unitPrice,
+    double? retailPrice,
+    double? wholesalePrice,
+    String? batchCode,
+    DateTime? expiryDate,
+  }) =>
+      OrderLine(
         productId: productId,
         productName: productName,
         sku: sku,
@@ -74,6 +97,10 @@ class OrderLine {
         companyId: companyId,
         quantity: quantity ?? this.quantity,
         unitPrice: unitPrice ?? this.unitPrice,
+        retailPrice: retailPrice ?? this.retailPrice,
+        wholesalePrice: wholesalePrice ?? this.wholesalePrice,
+        batchCode: batchCode ?? this.batchCode,
+        expiryDate: expiryDate ?? this.expiryDate,
       );
 
   Map<String, dynamic> toMap() => {
@@ -85,6 +112,11 @@ class OrderLine {
         'companyId': companyId,
         'quantity': quantity,
         'unitPrice': unitPrice,
+        if (retailPrice != null) 'retailPrice': retailPrice,
+        if (wholesalePrice != null) 'wholesalePrice': wholesalePrice,
+        if (batchCode.isNotEmpty) 'batchCode': batchCode,
+        if (expiryDate != null)
+          'expiryDate': Timestamp.fromDate(DateTime.utc(expiryDate!.year, expiryDate!.month, expiryDate!.day, 12)),
       };
 
   factory OrderLine.fromMap(Map<String, dynamic> d) => OrderLine(
@@ -96,6 +128,10 @@ class OrderLine {
         companyId: (d['companyId'] as String?) ?? '',
         quantity: (d['quantity'] as num?)?.toInt() ?? 0,
         unitPrice: (d['unitPrice'] as num?)?.toDouble() ?? 0,
+        retailPrice: (d['retailPrice'] as num?)?.toDouble(),
+        wholesalePrice: (d['wholesalePrice'] as num?)?.toDouble(),
+        batchCode: (d['batchCode'] as String?) ?? '',
+        expiryDate: d['expiryDate'] is Timestamp ? (d['expiryDate'] as Timestamp).toDate().toLocal() : null,
       );
 }
 
