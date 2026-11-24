@@ -50,6 +50,15 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
     );
   }
 
+  Future<void> _refresh() => pullRefresh(context, Db.refresh, () {
+        if (!mounted) return;
+        setState(() {
+          _companies = Db.watchCompanies();
+          _stores = Db.watchStores();
+          _products = Db.watchProducts();
+        });
+      });
+
   @override
   Widget build(BuildContext context) {
     final me = Session.of(context);
