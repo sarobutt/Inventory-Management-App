@@ -39,24 +39,16 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
 
   Future<void> _exportAll(List<Product> products, List<Company> companies, List<Store> stores,
       {required bool isAdmin}) async {
-    try {
-      final bytes = allProductsXlsx(products, companies, stores, showPrices: isAdmin);
-      final d = DateTime.now();
-      final stamp = '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-      if (mounted) await saveBytes(context, bytes, 'products_$stamp.xlsx');
-    } catch (e) {
-      if (mounted) showError(context, e);
-    }
+    final d = DateTime.now();
+    final stamp = '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+    await showExportSheet(
+      context,
+      title: 'All products',
+      fileBaseName: 'products_$stamp',
+      pdf: () => buildPdf(productsTable(products, companies, stores, showPrices: isAdmin)),
+      xlsx: () async => allProductsXlsx(products, companies, stores, showPrices: isAdmin),
+    );
   }
-
-  Future<void> _refresh() => pullRefresh(context, Db.refresh, () {
-        if (!mounted) return;
-        setState(() {
-          _companies = Db.watchCompanies();
-          _stores = Db.watchStores();
-          _products = Db.watchProducts();
-        });
-      });
 
   @override
   Widget build(BuildContext context) {
@@ -231,7 +223,7 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
                             ? null
                             : () => _exportAll(products, companySnap.data!, stores, isAdmin: isAdmin),
                         icon: const Icon(Icons.download_outlined),
-                        label: const Text('Export all products (Excel)'),
+                        label: const Text('Export all products (Excel, PDF, PNG)'),
                       ),
                     ),
                     if (q.isNotEmpty) ...[

@@ -129,7 +129,7 @@ class _StockOverviewScreenState extends State<StockOverviewScreen> {
       if (print) {
         await printTable(t, filterText: _scopeLabel);
       } else {
-        await shareTable(t, filterText: _scopeLabel);
+        await exportTable(context, t, filterText: _scopeLabel);
       }
     } catch (e) {
       if (mounted) showError(context, e);
@@ -165,8 +165,8 @@ class _StockOverviewScreenState extends State<StockOverviewScreen> {
             )
           else ...[
             IconButton(
-              tooltip: 'Share as PDF',
-              icon: const Icon(Icons.share_outlined),
+              tooltip: 'Share or save (PDF, PNG, Excel)',
+              icon: const Icon(Icons.ios_share),
               onPressed: _products == null ? null : () => _export(print: false),
             ),
             IconButton(

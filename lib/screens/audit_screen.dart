@@ -310,9 +310,9 @@ class _AuditScreenState extends State<AuditScreen> {
             )
           else ...[
             IconButton(
-              tooltip: 'Share as PDF',
-              icon: const Icon(Icons.share_outlined),
-              onPressed: _entries == null ? null : () => _export(shareTable),
+              tooltip: 'Share or save (PDF, PNG, Excel)',
+              icon: const Icon(Icons.ios_share),
+              onPressed: _entries == null ? null : () => _export((t, {String filterText = ''}) => exportTable(context, t, filterText: filterText)),
             ),
             IconButton(
               tooltip: 'Print',
@@ -950,9 +950,9 @@ class _ApprovalAuditScreenState extends State<ApprovalAuditScreen> {
             )
           else ...[
             IconButton(
-              tooltip: 'Share as PDF',
-              icon: const Icon(Icons.share_outlined),
-              onPressed: _requests == null ? null : () => _export(shareTable),
+              tooltip: 'Share or save (PDF, PNG, Excel)',
+              icon: const Icon(Icons.ios_share),
+              onPressed: _requests == null ? null : () => _export((t, {String filterText = ''}) => exportTable(context, t, filterText: filterText)),
             ),
             IconButton(
               tooltip: 'Print',

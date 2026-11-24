@@ -21,6 +21,15 @@ import 'orders.dart';
 
 enum OrderDocType { purchaseOrder, deliveryNote }
 
+/// Company details printed at the top of every purchase order / delivery note.
+const companyLegalName = 'Beauty Souq Trading';
+const companyDetails = [
+  'C.R. No: 208868',
+  'Shop No: 06, Building No: 53, Street No: 185, Zone No: 55',
+  'Al Azizyah – Qatar',
+  'Contact no: +974 7153 8325',
+];
+
 String orderDocTitle(OrderDocType t) => switch (t) {
       OrderDocType.purchaseOrder => 'Purchase Order',
       OrderDocType.deliveryNote => 'Delivery Note',
@@ -35,8 +44,18 @@ class DocLine {
   final double? wholesale;
   final String batch;
   final DateTime? expiry;
-  const DocLine(this.name, this.barcode, this.quantity, this.retail, this.wholesale, this.batch, this.expiry);
+  final double? poPrice; // typed in by hand (null = retail)
+  final double? dnPrice; // typed in by hand (null = wholesale)
+  const DocLine(this.name, this.barcode, this.quantity, this.retail, this.wholesale, this.batch, this.expiry,
+      {this.poPrice, this.dnPrice});
 }
+
+/// The price a document uses before anything is typed in: retail (PO) or wholesale (DN).
+double? defaultDocPrice(OrderDocType t, DocLine l) => t == OrderDocType.purchaseOrder ? l.retail : l.wholesale;
+
+/// The unit price a document prints: the hand-typed price if there is one, else the default.
+double? docUnitPrice(OrderDocType t, DocLine l) =>
+    (t == OrderDocType.purchaseOrder ? l.poPrice : l.dnPrice) ?? defaultDocPrice(t, l);
 
 /// Line details for the printouts. Older orders did not save prices/batch/expiry with
 /// their lines, so those are read from the products (and admin prices) once.
@@ -60,7 +79,8 @@ Future<List<DocLine>> docLines(PurchaseOrder o) async {
     for (final l in o.lines)
       if (l.hasProductDetails || !products.containsKey(l.productId))
         DocLine(l.productName, l.sku, l.quantity, l.retailPrice, l.wholesalePrice ?? l.unitPrice, l.batchCode,
-            l.expiryDate)
+            l.expiryDate,
+            poPrice: l.poPrice, dnPrice: l.dnPrice)
       else
         DocLine(
           l.productName,
@@ -72,12 +92,12 @@ Future<List<DocLine>> docLines(PurchaseOrder o) async {
           products[l.productId]!['expiryDate'] is Timestamp
               ? (products[l.productId]!['expiryDate'] as Timestamp).toDate().toLocal()
               : null,
+          poPrice: l.poPrice,
+          dnPrice: l.dnPrice,
         ),
   ];
 }
 
-double? _unitPrice(OrderDocType t, DocLine l) =>
-    t == OrderDocType.purchaseOrder ? l.retail : l.wholesale;
 
 String _num(double? v) => v == null ? '' : v.toStringAsFixed(2);
 
@@ -128,7 +148,7 @@ Future<Uint8List> buildOrderDocPdf(PurchaseOrder o, OrderDocType type, {DateTime
     if (isDn) 'Batch code',
     if (isDn) 'Expiry',
     'Qty',
-    isDn ? 'Unit price (QAR)' : 'Retail price (QAR)',
+    'Unit price (QAR)',
     'Total (QAR)',
   ];
   final numericFrom = headers.length - 3; // Qty, unit price, total
@@ -153,7 +173,7 @@ Future<Uint8List> buildOrderDocPdf(PurchaseOrder o, OrderDocType type, {DateTime
   ];
   for (var i = 0; i < lines.length; i++) {
     final l = lines[i];
-    final price = _unitPrice(type, l);
+    final price = docUnitPrice(type, l);
     final lineTotal = price == null ? null : price * l.quantity;
     units += l.quantity;
     total += lineTotal ?? 0;
@@ -217,7 +237,13 @@ Future<Uint8List> buildOrderDocPdf(PurchaseOrder o, OrderDocType type, {DateTime
         pw.Image(logo, height: 54),
         pw.SizedBox(width: 10),
         pw.Expanded(
-          child: pw.Text(appName, style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold, color: plum)),
+          child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+            pw.Text(companyLegalName,
+                style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, color: plum)),
+            pw.SizedBox(height: 2),
+            for (final line in companyDetails)
+              pw.Text(line, style: const pw.TextStyle(fontSize: 8.5, color: PdfColors.grey800)),
+          ]),
         ),
         pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
           pw.Text(title.toUpperCase(),
@@ -231,7 +257,7 @@ Future<Uint8List> buildOrderDocPdf(PurchaseOrder o, OrderDocType type, {DateTime
       pw.SizedBox(height: 4),
     ]),
     footer: (ctx) => pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
-      pw.Text('$appName · $title ${o.number}', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600)),
+      pw.Text('$companyLegalName · $title ${o.number}', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600)),
       pw.Text('Page ${ctx.pageNumber} of ${ctx.pagesCount}',
           style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600)),
     ]),
@@ -290,13 +316,16 @@ Future<Uint8List> buildOrderDocXlsx(PurchaseOrder o, OrderDocType type, {DateTim
     if (isDn) 'Batch code',
     if (isDn) 'Expiry date',
     'Quantity',
-    isDn ? 'Unit price (QAR)' : 'Retail price (QAR)',
+    'Unit price (QAR)',
     'Total (QAR)',
   ];
   var units = 0;
   var total = 0.0;
   final rows = <XlsxRow>[
-    ['$appName – ${orderDocTitle(type)} ${o.number}'],
+    [companyLegalName],
+    for (final line in companyDetails) [line],
+    [],
+    ['${orderDocTitle(type)} ${o.number}'],
     ['Date', formatDate(when)],
     ['Customer', o.customerName],
     if (o.customerRef.isNotEmpty) ['Customer ref', o.customerRef],
@@ -304,7 +333,7 @@ Future<Uint8List> buildOrderDocXlsx(PurchaseOrder o, OrderDocType type, {DateTim
     head,
   ];
   for (final l in lines) {
-    final price = _unitPrice(type, l);
+    final price = docUnitPrice(type, l);
     final lineTotal = price == null ? null : price * l.quantity;
     units += l.quantity;
     total += lineTotal ?? 0;

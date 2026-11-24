@@ -60,6 +60,11 @@ class OrderLine {
   final String batchCode;
   final DateTime? expiryDate;
 
+  /// Unit prices typed in by hand for the purchase order / delivery note
+  /// (null = use the retail / wholesale price).
+  final double? poPrice;
+  final double? dnPrice;
+
   const OrderLine({
     required this.productId,
     required this.productName,
@@ -73,7 +78,27 @@ class OrderLine {
     this.wholesalePrice,
     this.batchCode = '',
     this.expiryDate,
+    this.poPrice,
+    this.dnPrice,
   });
+
+  /// The same line with the hand-typed document prices replaced.
+  OrderLine withDocPrices({required double? poPrice, required double? dnPrice}) => OrderLine(
+        productId: productId,
+        productName: productName,
+        sku: sku,
+        storeId: storeId,
+        storeName: storeName,
+        companyId: companyId,
+        quantity: quantity,
+        unitPrice: unitPrice,
+        retailPrice: retailPrice,
+        wholesalePrice: wholesalePrice,
+        batchCode: batchCode,
+        expiryDate: expiryDate,
+        poPrice: poPrice,
+        dnPrice: dnPrice,
+      );
 
   double get total => unitPrice * quantity;
 
@@ -101,6 +126,8 @@ class OrderLine {
         wholesalePrice: wholesalePrice ?? this.wholesalePrice,
         batchCode: batchCode ?? this.batchCode,
         expiryDate: expiryDate ?? this.expiryDate,
+        poPrice: poPrice,
+        dnPrice: dnPrice,
       );
 
   Map<String, dynamic> toMap() => {
@@ -117,6 +144,8 @@ class OrderLine {
         if (batchCode.isNotEmpty) 'batchCode': batchCode,
         if (expiryDate != null)
           'expiryDate': Timestamp.fromDate(DateTime.utc(expiryDate!.year, expiryDate!.month, expiryDate!.day, 12)),
+        if (poPrice != null) 'poPrice': poPrice,
+        if (dnPrice != null) 'dnPrice': dnPrice,
       };
 
   factory OrderLine.fromMap(Map<String, dynamic> d) => OrderLine(
@@ -132,6 +161,8 @@ class OrderLine {
         wholesalePrice: (d['wholesalePrice'] as num?)?.toDouble(),
         batchCode: (d['batchCode'] as String?) ?? '',
         expiryDate: d['expiryDate'] is Timestamp ? (d['expiryDate'] as Timestamp).toDate().toLocal() : null,
+        poPrice: (d['poPrice'] as num?)?.toDouble(),
+        dnPrice: (d['dnPrice'] as num?)?.toDouble(),
       );
 }
 
@@ -318,6 +349,11 @@ class Orders {
       await _col.doc(o.id).update(data);
     }
   }
+
+  /// Saves only the hand-typed purchase order / delivery note prices of an existing order
+  /// (allowed for any status: it does not change stock or the order amount).
+  static Future<void> saveDocPrices(PurchaseOrder o) =>
+      _col.doc(o.id).update({'lines': [for (final l in o.lines) l.toMap()], 'updatedAt': FieldValue.serverTimestamp()});
 
   /// Completes the order: checks every store has enough stock, subtracts it, records
   /// the movements in the stock audit and marks the order completed – all at once.

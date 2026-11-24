@@ -323,6 +323,53 @@ class _OrderFormScreenState extends State<OrderFormScreen> {
       ),
     );
     if (type == null || !mounted) return;
+
+    // Check / change the unit prices first.
+    final List<DocLine> details;
+    try {
+      details = await docLines(_current());
+    } catch (e) {
+      if (mounted) showError(context, e);
+      return;
+    }
+    if (!mounted) return;
+    final prices = await Navigator.push<List<double?>>(
+      context,
+      MaterialPageRoute(fullscreenDialog: true, builder: (_) => _DocPricesScreen(type: type, lines: details)),
+    );
+    if (prices == null || !mounted) return;
+    double? typed(int i) {
+      final entered = prices[i];
+      final def = defaultDocPrice(type, details[i]);
+      if (entered == null) return null;
+      if (def != null && (entered - def).abs() < 0.005) return null; // same as the default
+      return entered;
+    }
+
+    setState(() {
+      _lines = [
+        for (var i = 0; i < _lines.length; i++)
+          _lines[i].withDocPrices(
+            poPrice: type == OrderDocType.purchaseOrder ? typed(i) : _lines[i].poPrice,
+            dnPrice: type == OrderDocType.deliveryNote ? typed(i) : _lines[i].dnPrice,
+          ),
+      ];
+    });
+    if (!_isNew) {
+      try {
+        if (_isDraft) {
+          await Orders.save(_current(), isNew: false);
+        } else {
+          await Orders.saveDocPrices(_current());
+        }
+      } catch (e) {
+        if (mounted) showError(context, e);
+      }
+    } else if (mounted) {
+      showMessage(context, 'Tap Save to keep these prices with the order.');
+    }
+    if (!mounted) return;
+
     final o = _current();
     final date = widget.order?.createdAt;
     final name = orderDocTitle(type);
@@ -920,6 +967,127 @@ class InvoiceViewerScreen extends StatelessWidget {
         canChangeOrientation: false,
         canChangePageFormat: false,
         canDebug: false,
+      ),
+    );
+  }
+}
+
+
+/// Unit prices for a purchase order / delivery note: filled in with the retail (PO) or
+/// wholesale (DN) price, or the price typed last time; any of them can be changed.
+class _DocPricesScreen extends StatefulWidget {
+  final OrderDocType type;
+  final List<DocLine> lines;
+  const _DocPricesScreen({required this.type, required this.lines});
+
+  @override
+  State<_DocPricesScreen> createState() => _DocPricesScreenState();
+}
+
+class _DocPricesScreenState extends State<_DocPricesScreen> {
+  late final List<TextEditingController> _ctrls = [
+    for (final l in widget.lines)
+      TextEditingController(text: docUnitPrice(widget.type, l)?.toStringAsFixed(2) ?? ''),
+  ];
+
+  @override
+  void dispose() {
+    for (final c in _ctrls) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  double? _value(int i) => parseMoney(_ctrls[i].text);
+
+  bool get _valid {
+    for (var i = 0; i < _ctrls.length; i++) {
+      final t = _ctrls[i].text.trim();
+      if (t.isEmpty) continue;
+      final v = _value(i);
+      if (v == null || v < 0) return false;
+    }
+    return true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isPo = widget.type == OrderDocType.purchaseOrder;
+    final scheme = Theme.of(context).colorScheme;
+    var total = 0.0;
+    for (var i = 0; i < widget.lines.length; i++) {
+      total += (_value(i) ?? 0) * widget.lines[i].quantity;
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('${orderDocTitle(widget.type)} prices'),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: FilledButton(
+              onPressed: _valid
+                  ? () => Navigator.pop(context, [for (var i = 0; i < _ctrls.length; i++) _value(i)])
+                  : null,
+              child: const Text('Continue'),
+            ),
+          ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+        children: [
+          Text(
+            'Unit prices start as the ${isPo ? 'retail' : 'wholesale'} price. Change any of them for this '
+            '${isPo ? 'purchase order' : 'delivery note'}; the product’s own prices are not changed.',
+            style: TextStyle(color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 12),
+          for (var i = 0; i < widget.lines.length; i++)
+            Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(widget.lines[i].name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 2),
+                  Text(
+                    [
+                      'Qty ${widget.lines[i].quantity}',
+                      if (defaultDocPrice(widget.type, widget.lines[i]) != null)
+                        '${isPo ? 'Retail' : 'Wholesale'} ${money(defaultDocPrice(widget.type, widget.lines[i])!)}',
+                    ].join(' · '),
+                    style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _ctrls[i],
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(labelText: 'Unit price (QAR)', isDense: true),
+                        onChanged: (_) => setState(() {}),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 110,
+                      child: Text(
+                        money((_value(i) ?? 0) * widget.lines[i].quantity),
+                        textAlign: TextAlign.right,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ]),
+                ]),
+              ),
+            ),
+          const SizedBox(height: 8),
+          Row(children: [
+            const Expanded(child: Text('Total', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
+            Text(money(total), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          ]),
+        ],
       ),
     );
   }

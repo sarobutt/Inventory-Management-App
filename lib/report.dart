@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:flutter/material.dart' show BuildContext;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -295,3 +296,12 @@ Uint8List allProductsXlsx(List<Product> products, List<Company> companies, List<
     widths: [40, 18, 18, 18, 10, 12, if (showPrices) 14, if (showPrices) 18, 16, 14, 12, 15, 30],
   );
 }
+
+/// Print, share, or save the table as PDF, PNG or Excel.
+Future<void> exportTable(BuildContext context, TableData t, {String filterText = ''}) => showExportSheet(
+      context,
+      title: t.title,
+      fileBaseName: t.title,
+      pdf: () => buildPdf(t, filterText: filterText),
+      xlsx: () async => tableToXlsx(t),
+    );

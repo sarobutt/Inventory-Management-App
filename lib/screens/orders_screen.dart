@@ -72,7 +72,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
       if (print) {
         await printTable(t, filterText: filters);
       } else {
-        await shareTable(t, filterText: filters);
+        await exportTable(context, t, filterText: filters);
       }
     } catch (e) {
       if (mounted) showError(context, e);
@@ -103,8 +103,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
             title: const Text('Purchase orders'),
             actions: [
               IconButton(
-                tooltip: 'Share list as PDF',
-                icon: const Icon(Icons.share_outlined),
+                tooltip: 'Share or save list (PDF, PNG, Excel)',
+                icon: const Icon(Icons.ios_share),
                 onPressed: list.isEmpty ? null : () => _export(list, print: false),
               ),
               IconButton(
